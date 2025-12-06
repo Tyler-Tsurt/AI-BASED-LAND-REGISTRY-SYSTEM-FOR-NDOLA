@@ -22,25 +22,8 @@
             </button>
             <button id="themeToggle" class="btn btn-sm theme-toggle-btn ms-2" aria-pressed="false" title="Toggle dark mode"><i class="fas fa-moon"></i></button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('index') }}">
-                            <i class="fas fa-home me-1"></i>Home
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('register_land') }}">
-                            <i class="fas fa-plus-circle me-1"></i>Register Land
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('about') }}">
-                            <i class="fas fa-info-circle me-1"></i>About
-                        </a>
-                    </li>
-                    <li class="nav-item" id="auth-nav">
-                        <!-- Will be populated dynamically -->
-                    </li>
+                <ul class="navbar-nav ms-auto" id="dynamic-nav">
+                    <!-- Navigation items will be populated dynamically based on user role -->
                 </ul>
             </div>
         </div>
@@ -102,61 +85,141 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-        const authNav = document.getElementById('auth-nav');
+        const dynamicNav = document.getElementById('dynamic-nav');
         fetch('/api/check-auth', {
             method: 'GET',
             credentials: 'same-origin'
         })
         .then(response => response.json())
         .then(data => {
-            if (data.authenticated) {
-                // Add logout link
-                authNav.innerHTML = `
-                    <a class="nav-link" href="{{ url_for('logout') }}">
-                        <i class="fas fa-sign-out-alt me-1"></i>Logout
+            let navItems = [];
+            
+            // Home - Always visible
+            navItems.push(`
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('index') }}">
+                        <i class="fas fa-home me-1"></i>Home
                     </a>
-                `;
-                
-                // Hide Register Land and Application Status for admin users
-                const registerLandLink = document.querySelector('a[href="{{ url_for("register_land") }}"]');
-                if (registerLandLink && data.role && (data.role === 'admin' || data.role === 'super_admin')) {
-                    registerLandLink.parentElement.style.display = 'none';
-                }
-                
-                // Show Application Status ONLY for citizens
+                </li>
+            `);
+            
+            if (data.authenticated) {
+                // Role-based navigation
                 if (data.role === 'citizen') {
-                    authNav.insertAdjacentHTML('beforebegin', `
+                    navItems.push(`
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('register_land') }}">
+                                <i class="fas fa-plus-circle me-1"></i>Register Land
+                            </a>
+                        </li>
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('application_status') }}">
-                                <i class="fas fa-clipboard-list me-1"></i>Application Status
+                                <i class="fas fa-clipboard-list me-1"></i>My Applications
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('available_lands') }}">
+                                <i class="fas fa-store me-1"></i>Available Lands
+                            </a>
+                        </li>
+                    `);
+                } else if (data.role === 'seller' || data.role === 'admin' || data.role === 'super_admin') {
+                    // Admin/Seller navigation
+                    if (data.role === 'admin' || data.role === 'super_admin') {
+                        navItems.push(`
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                                    <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                                </a>
+                            </li>
+                        `);
+                    }
+                    if (data.role === 'seller' || data.role === 'admin' || data.role === 'super_admin') {
+                        navItems.push(`
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for('seller_dashboard') }}">
+                                    <i class="fas fa-store-alt me-1"></i>Listings
+                                </a>
+                            </li>
+                        `);
+                    }
+                    navItems.push(`
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('available_lands') }}">
+                                <i class="fas fa-store me-1"></i>Browse Lands
                             </a>
                         </li>
                     `);
                 }
                 
-                // Show Admin Dashboard for admin users
-                if (data.role && (data.role === 'admin' || data.role === 'super_admin')) {
-                    authNav.insertAdjacentHTML('beforebegin', `
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
-                                <i class="fas fa-tachometer-alt me-1"></i>Admin Dashboard
-                            </a>
-                        </li>
-                    `);
-                }
+                // About - Always visible for authenticated users
+                navItems.push(`
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('about') }}">
+                            <i class="fas fa-info-circle me-1"></i>About
+                        </a>
+                    </li>
+                `);
+                
+                // Logout
+                navItems.push(`
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('logout') }}">
+                            <i class="fas fa-sign-out-alt me-1"></i>Logout
+                        </a>
+                    </li>
+                `);
             } else {
-                authNav.innerHTML = `
+                // Not authenticated
+                navItems.push(`
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('available_lands') }}">
+                            <i class="fas fa-store me-1"></i>Available Lands
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('about') }}">
+                            <i class="fas fa-info-circle me-1"></i>About
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('register') }}">
+                            <i class="fas fa-user-plus me-1"></i>Register
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('login') }}">
+                            <i class="fas fa-sign-in-alt me-1"></i>Login
+                        </a>
+                    </li>
+                `);
+            }
+            
+            dynamicNav.innerHTML = navItems.join('');
+        })
+        .catch(error => {
+            // Error or not authenticated - show public nav
+            dynamicNav.innerHTML = `
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('index') }}">
+                        <i class="fas fa-home me-1"></i>Home
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('available_lands') }}">
+                        <i class="fas fa-store me-1"></i>Available Lands
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('about') }}">
+                        <i class="fas fa-info-circle me-1"></i>About
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('login') }}">
                         <i class="fas fa-sign-in-alt me-1"></i>Login
                     </a>
-                `;
-            }
-        })
-        .catch(error => {
-            authNav.innerHTML = `
-                <a class="nav-link" href="{{ url_for('login') }}">
-                    <i class="fas fa-sign-in-alt me-1"></i>Login
-                </a>
+                </li>
             `;
         });
 
@@ -174,7 +237,7 @@
         }
 
         try{
-            const stored = localStorage.getItem('ndola_theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            const stored = localStorage.getItem('ndola_theme') || 'light';
             applyTheme(stored);
         }catch(e){ applyTheme('light'); }
 
@@ -188,5 +251,6 @@
         }
     });
     </script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

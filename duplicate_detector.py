@@ -1,254 +1,65 @@
 """
 duplicate_detector.py
 
-Advanced duplicate detection system that checks for duplicates across different formats.
-Detects:
-1. Exact file duplicates (same hash)
-2. Content duplicates (same person/property info in different file formats)
-3. Identity duplicates (same NRC/TPIN across different applications)
-4. Spatial duplicates (overlapping land parcels)
+Detects duplicate applications based on identity and document analysis.
 """
-import re
-import hashlib
-from typing import List, Dict, Tuple, Optional
+import logging
 from datetime import datetime
-from difflib import SequenceMatcher
+from typing import List
 
-from models import db, Document, LandApplication, LandParcel, LandConflict
-from document_processing import extract_document_text
-from validation_utils import normalize_identifier
+from sqlalchemy import or_
+
+from models import db, LandApplication, Document, LandConflict, AuditLog
+
+logger = logging.getLogger(__name__)
 
 
-def extract_identifiers_from_text(text: str) -> Dict[str, List[str]]:
+def check_identity_duplicate(nrc_number: str, tpin_number: str = None) -> List[LandApplication]:
     """
-    Extract NRC numbers, TPINs, phone numbers, and emails from document text.
-    
-    Returns:
-        Dict with keys: 'nrc', 'tpin', 'phone', 'email'
-    """
-    identifiers = {
-        'nrc': [],
-        'tpin': [],
-        'phone': [],
-        'email': []
-    }
-    
-    if not text:
-        return identifiers
-    
-    # Extract NRC numbers (format: 123456/12/1)
-    nrc_pattern = r'\b\d{6}/\d{2}/\d\b'
-    identifiers['nrc'] = list(set(re.findall(nrc_pattern, text)))
-    
-    # Extract TPIN numbers (10 digits)
-    tpin_pattern = r'\b[1-9]\d{9}\b'
-    identifiers['tpin'] = list(set(re.findall(tpin_pattern, text)))
-    
-    # Extract phone numbers (Zambian format)
-    phone_pattern = r'(?:\+260|0)(?:95|96|97|76|77|75|78)\d{7}'
-    identifiers['phone'] = list(set(re.findall(phone_pattern, text)))
-    
-    # Extract email addresses
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    identifiers['email'] = list(set(re.findall(email_pattern, text)))
-    
-    return identifiers
-
-
-def calculate_text_similarity(text1: str, text2: str) -> float:
-    """
-    Calculate similarity ratio between two texts using SequenceMatcher.
-    
-    Returns:
-        Similarity ratio between 0.0 and 1.0
-    """
-    if not text1 or not text2:
-        return 0.0
-    
-    # Normalize texts
-    text1_norm = text1.lower().strip()
-    text2_norm = text2.lower().strip()
-    
-    # Calculate similarity
-    return SequenceMatcher(None, text1_norm, text2_norm).ratio()
-
-
-def check_file_hash_duplicate(file_hash: str, exclude_doc_id: Optional[int] = None) -> List[Document]:
-    """
-    Check if a file with the same hash already exists.
+    Check if an NRC/TPIN already exists in other applications.
     
     Args:
-        file_hash: SHA-256 hash of the file
-        exclude_doc_id: Document ID to exclude from search (for updates)
+        nrc_number: National Registration Card number
+        tpin_number: Tax Payer Identification Number (optional)
     
     Returns:
-        List of duplicate documents
+        List of applications with matching NRC or TPIN
     """
-    query = Document.query.filter(Document.file_hash == file_hash)
-    
-    if exclude_doc_id:
-        query = query.filter(Document.id != exclude_doc_id)
-    
-    return query.all()
-
-
-def check_content_duplicate(application_id: int) -> List[Dict]:
-    """
-    Check if application contains documents with content matching other applications.
-    This detects cases where the same information is submitted in different file formats.
-    
-    Returns:
-        List of conflict dictionaries with details
-    """
-    conflicts = []
+    if not nrc_number:
+        return []
     
     try:
-        # Get current application and its documents
-        application = LandApplication.query.get(application_id)
-        if not application or not application.documents:
-            return conflicts
+        # Build query for matching NRC or TPIN
+        filters = [LandApplication.nrc_number == nrc_number]
         
-        # Extract text and identifiers from all documents
-        app_texts = []
-        app_identifiers = {
-            'nrc': set(),
-            'tpin': set(),
-            'phone': set(),
-            'email': set()
-        }
+        if tpin_number:
+            filters.append(LandApplication.tpin_number == tpin_number)
         
-        for doc in application.documents:
-            text = extract_document_text(doc.file_path, doc.mime_type)
-            if text:
-                app_texts.append(text)
-                # Extract identifiers
-                ids = extract_identifiers_from_text(text)
-                for key in app_identifiers:
-                    app_identifiers[key].update(ids[key])
-        
-        # Add application's own identifiers
-        if application.nrc_number:
-            app_identifiers['nrc'].add(normalize_identifier(application.nrc_number, 'nrc'))
-        if application.tpin_number:
-            app_identifiers['tpin'].add(normalize_identifier(application.tpin_number, 'tpin'))
-        if application.phone_number:
-            app_identifiers['phone'].add(normalize_identifier(application.phone_number, 'phone'))
-        if application.email:
-            app_identifiers['email'].add(normalize_identifier(application.email, 'email'))
-        
-        # Check against other applications
-        other_applications = LandApplication.query.filter(
-            LandApplication.id != application_id,
-            LandApplication.user_id.isnot(None)
+        # Find matching applications
+        duplicates = LandApplication.query.filter(
+            or_(*filters),
+            LandApplication.status != 'rejected'  # Don't include rejected apps
         ).all()
         
-        for other_app in other_applications:
-            match_score = 0.0
-            match_details = []
-            
-            # Check identifier matches
-            other_identifiers = {
-                'nrc': set(),
-                'tpin': set(),
-                'phone': set(),
-                'email': set()
-            }
-            
-            if other_app.nrc_number:
-                other_identifiers['nrc'].add(normalize_identifier(other_app.nrc_number, 'nrc'))
-            if other_app.tpin_number:
-                other_identifiers['tpin'].add(normalize_identifier(other_app.tpin_number, 'tpin'))
-            if other_app.phone_number:
-                other_identifiers['phone'].add(normalize_identifier(other_app.phone_number, 'phone'))
-            if other_app.email:
-                other_identifiers['email'].add(normalize_identifier(other_app.email, 'email'))
-            
-            # Extract from documents
-            for doc in other_app.documents:
-                text = extract_document_text(doc.file_path, doc.mime_type)
-                if text:
-                    ids = extract_identifiers_from_text(text)
-                    for key in other_identifiers:
-                        other_identifiers[key].update(ids[key])
-            
-            # Calculate matches
-            for key in ['nrc', 'tpin', 'phone', 'email']:
-                common = app_identifiers[key].intersection(other_identifiers[key])
-                if common:
-                    if key == 'nrc' or key == 'tpin':
-                        match_score += 0.4  # High weight for ID numbers
-                    elif key == 'email':
-                        match_score += 0.2  # Medium weight
-                    else:
-                        match_score += 0.1  # Lower weight for phone
-                    
-                    match_details.append(f"Matching {key.upper()}: {', '.join(common)}")
-            
-            # If significant match found, create conflict
-            if match_score >= 0.4:  # Threshold: at least one ID match
-                conflicts.append({
-                    'conflicting_app_id': other_app.id,
-                    'conflict_type': 'content_duplicate',
-                    'confidence_score': min(match_score, 1.0),
-                    'details': match_details,
-                    'other_app': other_app
-                })
+        logger.info(f"Found {len(duplicates)} applications with matching NRC/TPIN")
+        return duplicates
     
     except Exception as e:
-        print(f"Error in check_content_duplicate: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    return conflicts
-
-
-def check_identity_duplicate(nrc: str, tpin: str, exclude_app_id: Optional[int] = None) -> List[LandApplication]:
-    """
-    Check if NRC or TPIN already exists in other applications.
-    
-    Args:
-        nrc: NRC number to check
-        tpin: TPIN number to check
-        exclude_app_id: Application ID to exclude from search
-    
-    Returns:
-        List of applications with matching identifiers
-    """
-    duplicates = []
-    
-    # Normalize identifiers
-    nrc_norm = normalize_identifier(nrc, 'nrc') if nrc else None
-    tpin_norm = normalize_identifier(tpin, 'tpin') if tpin else None
-    
-    # Build query
-    query = LandApplication.query.filter(LandApplication.user_id.isnot(None))
-    
-    if exclude_app_id:
-        query = query.filter(LandApplication.id != exclude_app_id)
-    
-    # Check NRC matches
-    if nrc_norm:
-        nrc_matches = query.filter(LandApplication.nrc_number == nrc_norm).all()
-        duplicates.extend(nrc_matches)
-    
-    # Check TPIN matches
-    if tpin_norm:
-        tpin_matches = query.filter(LandApplication.tpin_number == tpin_norm).all()
-        # Avoid adding duplicates if already matched by NRC
-        for match in tpin_matches:
-            if match not in duplicates:
-                duplicates.append(match)
-    
-    return duplicates
+        logger.exception(f"Error checking identity duplicates: {e}")
+        return []
 
 
 def detect_all_duplicates(application_id: int) -> List[LandConflict]:
     """
-    Comprehensive duplicate detection for an application.
+    Detect all types of duplicates for an application.
+    
     Checks:
-    1. File hash duplicates
-    2. Content duplicates across formats
-    3. Identity duplicates (NRC/TPIN)
+    1. Identity duplicates (same NRC/TPIN)
+    2. Document hash duplicates (same file uploaded multiple times)
+    3. Location duplicates (same location description)
+    
+    Args:
+        application_id: ID of the application to check
     
     Returns:
         List of created LandConflict objects
@@ -256,216 +67,266 @@ def detect_all_duplicates(application_id: int) -> List[LandConflict]:
     created_conflicts = []
     
     try:
-        application = LandApplication.query.get(application_id)
+        logger.info(f"Starting duplicate detection for application {application_id}")
+        
+        # Get the application
+        application = db.session.get(LandApplication, application_id)
         if not application:
+            logger.error(f"Application {application_id} not found")
             return created_conflicts
         
-        # 1. Check file hash duplicates
-        for doc in application.documents:
-            if doc.file_hash:
-                hash_duplicates = check_file_hash_duplicate(doc.file_hash, doc.id)
+        # 1. Check for identity duplicates - CHECK BOTH APPLICATIONS AND PARCELS
+        if application.nrc_number:
+            logger.info(f"Checking NRC {application.nrc_number} against applications and parcels")
+            
+            # A. Check against other applications
+            identity_dups = LandApplication.query.filter(
+                or_(
+                    LandApplication.nrc_number == application.nrc_number,
+                    LandApplication.tpin_number == application.tpin_number
+                ),
+                LandApplication.id != application_id,
+                LandApplication.status != 'rejected'
+            ).all()
+            
+            for dup_app in identity_dups:
+                # Check if conflict already exists
+                existing = LandConflict.query.filter_by(
+                    application_id=application_id,
+                    conflict_type='identity_duplicate'
+                ).filter(
+                    LandConflict.description.contains(dup_app.reference_number)
+                ).first()
                 
-                for dup_doc in hash_duplicates:
-                    # Only create conflict if from different application
-                    if dup_doc.application_id != application_id:
-                        dup_app = dup_doc.application
-                        
-                        # Check if conflict already exists
-                        existing = LandConflict.query.filter_by(
-                            application_id=application_id,
-                            conflict_type='document_duplicate',
-                            status='unresolved'
-                        ).filter(
-                            LandConflict.description.like(f'%{dup_app.reference_number}%')
-                        ).first()
-                        
-                        if not existing:
-                            conflict = LandConflict(
-                                application_id=application_id,
-                                conflicting_parcel_id=dup_app.land_parcel.id if dup_app.land_parcel else None,
-                                description=build_duplicate_description('document', doc, dup_doc, dup_app),
-                                status='unresolved',
-                                detected_by_ai=True,
-                                created_at=datetime.utcnow(),
-                                conflict_type='document_duplicate',
-                                title=f"⚠️ Duplicate Document: {doc.document_type}",
-                                severity='high',
-                                confidence_score=1.0  # Exact hash match = 100% confidence
-                            )
-                            db.session.add(conflict)
-                            created_conflicts.append(conflict)
-        
-        # 2. Check content duplicates
-        content_conflicts = check_content_duplicate(application_id)
-        
-        for conflict_data in content_conflicts:
-            # Check if conflict already exists
-            existing = LandConflict.query.filter_by(
-                application_id=application_id,
-                conflict_type='content_duplicate',
-                status='unresolved'
-            ).filter(
-                LandConflict.description.like(f'%{conflict_data["other_app"].reference_number}%')
-            ).first()
+                if not existing:
+                    conflict = LandConflict(
+                        application_id=application_id,
+                        conflicting_parcel_id=None,
+                        description=f"⚠️ DUPLICATE NRC DETECTED\n\n"
+                                   f"Your NRC number ({application.nrc_number}) has already been used in another application.\n\n"
+                                   f"EXISTING APPLICATION:\n"
+                                   f"  Reference: {dup_app.reference_number}\n"
+                                   f"  Applicant Name: {dup_app.applicant_name}\n"
+                                   f"  Location: {dup_app.land_location}\n"
+                                   f"  Submitted: {dup_app.submitted_at.strftime('%Y-%m-%d')}\n\n"
+                                   f"WHAT THIS MEANS:\n"
+                                   f"  - You may have already applied for land registration\n"
+                                   f"  - Someone may be using your NRC fraudulently\n"
+                                   f"  - If this is your previous application, please contact us\n\n"
+                                   f"REQUIRED ACTION:\n"
+                                   f"  Contact the land registry immediately to verify your identity and resolve this issue.",
+                        detected_by_ai=True,
+                        conflict_type='identity_duplicate',
+                        title=f"⚠️ Duplicate NRC: {application.nrc_number}",
+                        severity='high',
+                        confidence_score=0.95,
+                        status='unresolved'
+                    )
+                    db.session.add(conflict)
+                    created_conflicts.append(conflict)
+                    logger.info(f"Identity duplicate found in applications: {dup_app.reference_number}")
             
-            if not existing:
-                other_app = conflict_data['other_app']
-                conflict = LandConflict(
-                    application_id=application_id,
-                    conflicting_parcel_id=other_app.land_parcel.id if other_app.land_parcel else None,
-                    description=build_content_duplicate_description(application, other_app, conflict_data['details']),
-                    status='unresolved',
-                    detected_by_ai=True,
-                    created_at=datetime.utcnow(),
-                    conflict_type='content_duplicate',
-                    title=f"⚠️ Content Duplicate with Application {other_app.reference_number}",
-                    severity='high',
-                    confidence_score=conflict_data['confidence_score']
-                )
-                db.session.add(conflict)
-                created_conflicts.append(conflict)
-        
-        # 3. Check identity duplicates
-        identity_duplicates = check_identity_duplicate(
-            application.nrc_number,
-            application.tpin_number,
-            application_id
-        )
-        
-        for dup_app in identity_duplicates:
-            # Check if conflict already exists
-            existing = LandConflict.query.filter_by(
-                application_id=application_id,
-                conflict_type='identity_duplicate',
-                status='unresolved'
-            ).filter(
-                LandConflict.description.like(f'%{dup_app.reference_number}%')
-            ).first()
+            # B. Check against existing land parcels (IMPORTANT!)
+            identity_parcels = LandParcel.query.filter(
+                LandParcel.owner_nrc == application.nrc_number
+            ).all()
             
-            if not existing:
-                conflict = LandConflict(
+            for parcel in identity_parcels:
+                # Check if this parcel's application is different from current one
+                if parcel.application_id and parcel.application_id != application_id:
+                    continue  # Already handled in section A
+                
+                # Check if conflict already exists
+                existing = LandConflict.query.filter_by(
                     application_id=application_id,
-                    conflicting_parcel_id=dup_app.land_parcel.id if dup_app.land_parcel else None,
-                    description=build_identity_duplicate_description(application, dup_app),
-                    status='unresolved',
-                    detected_by_ai=True,
-                    created_at=datetime.utcnow(),
-                    conflict_type='identity_duplicate',
-                    title=f"⚠️ Same Person/Entity: {dup_app.applicant_name}",
-                    severity='medium',
-                    confidence_score=0.95
-                )
-                db.session.add(conflict)
-                created_conflicts.append(conflict)
+                    conflicting_parcel_id=parcel.id,
+                    conflict_type='identity_duplicate'
+                ).first()
+                
+                if not existing:
+                    conflict = LandConflict(
+                        application_id=application_id,
+                        conflicting_parcel_id=parcel.id,
+                        description=f"⚠️ NRC ALREADY REGISTERED\n\n"
+                                   f"Your NRC number ({application.nrc_number}) is already registered to an existing land parcel.\n\n"
+                                   f"EXISTING PARCEL:\n"
+                                   f"  Parcel Number: {parcel.parcel_number}\n"
+                                   f"  Owner Name: {parcel.owner_name}\n"
+                                   f"  Location: {parcel.location}\n"
+                                   f"  Size: {parcel.size} hectares\n"
+                                   f"  Certificate: {parcel.certificate_number or 'N/A'}\n\n"
+                                   f"WHAT THIS MEANS:\n"
+                                   f"  - You already own registered land\n"
+                                   f"  - You may be applying for additional land (if legitimate)\n"
+                                   f"  - Someone may be using your NRC fraudulently\n\n"
+                                   f"REQUIRED ACTION:\n"
+                                   f"  Provide written justification for additional land registration, or contact us if this is fraudulent.",
+                        detected_by_ai=True,
+                        conflict_type='identity_duplicate',
+                        title=f"⚠️ NRC Already Owns Land: {parcel.parcel_number}",
+                        severity='high',
+                        confidence_score=0.95,
+                        status='unresolved'
+                    )
+                    db.session.add(conflict)
+                    created_conflicts.append(conflict)
+                    logger.info(f"Identity duplicate found in parcels: {parcel.parcel_number}")
         
+        # 2. Check for document hash duplicates (CRITICAL for fraud detection)
+        app_docs = Document.query.filter_by(application_id=application_id).all()
+        logger.info(f"Checking {len(app_docs)} documents for duplicates")
+        
+        for doc in app_docs:
+            if not doc.file_hash:
+                logger.warning(f"Document {doc.id} has no hash - cannot check for duplicates")
+                continue
+            
+            # Find other documents with same hash
+            dup_docs = Document.query.filter(
+                Document.file_hash == doc.file_hash,
+                Document.application_id != application_id
+            ).all()
+            
+            logger.info(f"Found {len(dup_docs)} duplicate documents for {doc.document_type}")
+            
+            for dup_doc in dup_docs:
+                dup_app = dup_doc.application
+                
+                # Check if conflict already exists for THIS specific document pair
+                existing = LandConflict.query.filter_by(
+                    application_id=application_id,
+                    conflict_type='document_duplicate'
+                ).filter(
+                    LandConflict.description.contains(dup_app.reference_number),
+                    LandConflict.description.contains(doc.document_type)
+                ).first()
+                
+                if not existing:
+                    # Determine if names match (legitimate) or differ (fraud)
+                    name_matches = (application.applicant_name.lower().strip() == 
+                                  dup_app.applicant_name.lower().strip())
+                    
+                    if name_matches:
+                        severity_level = 'medium'
+                        fraud_indicator = "DUPLICATE APPLICATION (Same Person)"
+                        action_required = "This appears to be a duplicate application. Please confirm if this is intentional."
+                    else:
+                        severity_level = 'high'
+                        fraud_indicator = "DOCUMENT FRAUD DETECTED (Different People)"
+                        action_required = "This is a serious issue. The same document is being used by different applicants. Immediate verification required."
+                    
+                    conflict = LandConflict(
+                        application_id=application_id,
+                        conflicting_parcel_id=None,
+                        description=f"⚠️ {fraud_indicator}\n\n"
+                                   f"Your document '{doc.document_type}' ({doc.original_filename}) is IDENTICAL to a document from another application.\n\n"
+                                   f"YOUR APPLICATION:\n"
+                                   f"  Applicant: {application.applicant_name}\n"
+                                   f"  NRC: {application.nrc_number}\n"
+                                   f"  Document: {doc.document_type}\n\n"
+                                   f"MATCHING DOCUMENT FROM:\n"
+                                   f"  Reference: {dup_app.reference_number}\n"
+                                   f"  Applicant: {dup_app.applicant_name}\n"
+                                   f"  NRC: {dup_app.nrc_number}\n"
+                                   f"  Location: {dup_app.land_location}\n"
+                                   f"  Submitted: {dup_app.submitted_at.strftime('%Y-%m-%d')}\n"
+                                   f"  Document: {dup_doc.document_type}\n\n"
+                                   f"WHAT THIS MEANS:\n"
+                                   f"  - The exact same file was uploaded for both applications\n"
+                                   f"  - This indicates either document reuse or fraudulent submission\n"
+                                   f"  - Legitimate documents should be unique to each applicant\n\n"
+                                   f"REQUIRED ACTION:\n"
+                                   f"  {action_required}",
+                        detected_by_ai=True,
+                        conflict_type='document_duplicate',
+                        title=f"⚠️ Document Reuse: {doc.document_type}",
+                        severity=severity_level,
+                        confidence_score=0.98,  # Hash match = very high confidence
+                        status='unresolved'
+                    )
+                    db.session.add(conflict)
+                    created_conflicts.append(conflict)
+                    logger.info(f"Document duplicate found: {doc.document_type} matches {dup_app.reference_number} (Names match: {name_matches})")
+                    break  # Only create one conflict per document type
+        
+        # 3. Location duplicate check removed - handled by ai_conflict_clean.py with improved plot number matching
+        
+        # Update application duplicate score
         if created_conflicts:
-            application.ai_processed = True
-            application.status = 'conflict'
+            max_confidence = max(c.confidence_score for c in created_conflicts)
+            application.ai_duplicate_score = max_confidence
+            if application.status == 'pending':
+                application.status = 'conflict'
+        else:
+            application.ai_duplicate_score = 0.0
+        
+        # Commit changes
+        db.session.commit()
+        
+        # Log audit
+        try:
+            audit_log = AuditLog(
+                user_id=None,
+                action='detect_duplicates',
+                table_name='land_applications',
+                record_id=application_id,
+                new_values={'duplicates_found': len(created_conflicts)},
+                timestamp=datetime.utcnow()
+            )
+            db.session.add(audit_log)
             db.session.commit()
+        except Exception as e:
+            logger.error(f"Failed to log audit: {e}")
+        
+        logger.info(f"Duplicate detection complete for application {application_id}: {len(created_conflicts)} duplicates")
+        return created_conflicts
     
     except Exception as e:
+        logger.exception(f"Error in duplicate detection for application {application_id}")
         db.session.rollback()
-        print(f"Error in detect_all_duplicates: {e}")
-        import traceback
-        traceback.print_exc()
+        return created_conflicts
+
+
+def resolve_duplicate(conflict_id: int, resolved_by: int = None) -> bool:
+    """
+    Mark a duplicate conflict as resolved.
     
-    return created_conflicts
-
-
-def build_duplicate_description(dup_type: str, doc1: Document, doc2: Document, other_app: LandApplication) -> str:
-    """Build detailed description for document duplicate."""
-    lines = []
-    lines.append("🚨 EXACT DOCUMENT DUPLICATE DETECTED")
-    lines.append("\nAI has detected that you uploaded the EXACT SAME FILE that exists in another application.")
-    lines.append("\n📄 YOUR DOCUMENT:")
-    lines.append(f"• Filename: {doc1.original_filename}")
-    lines.append(f"• Type: {doc1.document_type}")
-    lines.append(f"• Size: {doc1.file_size // 1024} KB")
-    lines.append(f"• Upload Date: {doc1.uploaded_at.strftime('%Y-%m-%d %H:%M')}")
-    lines.append("\n🔄 MATCHING DOCUMENT FROM:")
-    lines.append(f"• Application: {other_app.reference_number}")
-    lines.append(f"• Applicant: {other_app.applicant_name}")
-    lines.append(f"• NRC: {other_app.nrc_number}")
-    lines.append(f"• Location: {other_app.land_location}")
-    lines.append(f"• Date: {other_app.submitted_at.strftime('%Y-%m-%d')}")
-    lines.append(f"• Document: {doc2.original_filename}")
-    lines.append(f"• Type: {doc2.document_type}")
-    lines.append("\n⚠️ SEVERITY: CRITICAL")
-    lines.append("This is a 100% exact match (same file hash).")
-    lines.append("\n❓ POSSIBLE CAUSES:")
-    lines.append("• Same person applying twice (Check if both applications are yours)")
-    lines.append("• Document accidentally reused from another application")
-    lines.append("• Someone else uploaded your document without permission")
-    lines.append("• Fraudulent activity (using someone else's documents)")
-    lines.append("\n✅ REQUIRED ACTION:")
-    lines.append("1. Contact the registry IMMEDIATELY if you did not create both applications")
-    lines.append("2. Provide written explanation if this is a legitimate resubmission")
-    lines.append("3. Upload NEW, ORIGINAL documents if this was an error")
+    Args:
+        conflict_id: ID of the conflict to resolve
+        resolved_by: User ID who resolved it
     
-    return "\n".join(lines)
-
-
-def build_content_duplicate_description(app1: LandApplication, app2: LandApplication, details: List[str]) -> str:
-    """Build detailed description for content duplicate."""
-    lines = []
-    lines.append("🔍 CONTENT DUPLICATE DETECTED")
-    lines.append("\nAI has found that your application contains information matching another application.")
-    lines.append("This may indicate the same person/property submitted in different file formats.")
-    lines.append("\n📋 MATCHING INFORMATION:")
-    for detail in details:
-        lines.append(f"• {detail}")
-    lines.append("\n📃 CONFLICTING APPLICATION:")
-    lines.append(f"• Reference: {app2.reference_number}")
-    lines.append(f"• Applicant: {app2.applicant_name}")
-    lines.append(f"• NRC: {app2.nrc_number}")
-    lines.append(f"• TPIN: {app2.tpin_number}")
-    lines.append(f"• Location: {app2.land_location}")
-    lines.append(f"• Date Submitted: {app2.submitted_at.strftime('%Y-%m-%d')}")
-    lines.append(f"• Status: {app2.status.upper()}")
-    lines.append("\n⚠️ WHY THIS MATTERS:")
-    lines.append("• You cannot apply for land twice using the same identity")
-    lines.append("• Each person can only have ONE active application per property")
-    lines.append("• This could be fraudulent use of your identity")
-    lines.append("\n✅ WHAT TO DO:")
-    lines.append("1. If BOTH applications are yours:")
-    lines.append("   - Contact registry to withdraw one application")
-    lines.append("   - Explain why you submitted twice")
-    lines.append("2. If the OTHER application is NOT yours:")
-    lines.append("   - Report immediately - someone may be using your identity")
-    lines.append("   - Bring your ID to the registry for verification")
-    lines.append("3. If this is a mistake:")
-    lines.append("   - Provide documentation showing different identity")
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        conflict = db.session.get(LandConflict, conflict_id)
+        if not conflict:
+            return False
+        
+        conflict.status = 'resolved'
+        conflict.resolved_at = datetime.utcnow()
+        db.session.commit()
+        
+        # Log audit
+        try:
+            audit_log = AuditLog(
+                user_id=resolved_by,
+                action='resolve_duplicate',
+                table_name='land_conflicts',
+                record_id=conflict_id,
+                old_values={'status': 'unresolved'},
+                new_values={'status': 'resolved'},
+                timestamp=datetime.utcnow()
+            )
+            db.session.add(audit_log)
+            db.session.commit()
+        except Exception as e:
+            logger.error(f"Failed to log resolution: {e}")
+        
+        logger.info(f"Duplicate conflict {conflict_id} resolved")
+        return True
     
-    return "\n".join(lines)
-
-
-def build_identity_duplicate_description(app1: LandApplication, app2: LandApplication) -> str:
-    """Build detailed description for identity duplicate."""
-    lines = []
-    lines.append("👤 SAME IDENTITY DETECTED")
-    lines.append("\nYour NRC and/or TPIN matches another application in the system.")
-    lines.append("\n📇 YOUR APPLICATION:")
-    lines.append(f"• Reference: {app1.reference_number}")
-    lines.append(f"• Applicant: {app1.applicant_name}")
-    lines.append(f"• NRC: {app1.nrc_number}")
-    lines.append(f"• TPIN: {app1.tpin_number}")
-    lines.append(f"• Location: {app1.land_location}")
-    lines.append("\n🔄 EXISTING APPLICATION:")
-    lines.append(f"• Reference: {app2.reference_number}")
-    lines.append(f"• Applicant: {app2.applicant_name}")
-    lines.append(f"• NRC: {app2.nrc_number}")
-    lines.append(f"• TPIN: {app2.tpin_number}")
-    lines.append(f"• Location: {app2.land_location}")
-    lines.append(f"• Date: {app2.submitted_at.strftime('%Y-%m-%d')}")
-    lines.append(f"• Status: {app2.status.upper()}")
-    lines.append("\n⚠️ POLICY:")
-    lines.append("• Each person can only have ONE active land application")
-    lines.append("• You must withdraw one application to proceed with the other")
-    lines.append("• Both applications will be on hold until resolved")
-    lines.append("\n✅ RESOLUTION:")
-    lines.append("1. Visit the registry with your National ID")
-    lines.append("2. Choose which application to keep")
-    lines.append("3. Formally withdraw the other application")
-    lines.append("4. Alternatively, combine both into one application if for different properties")
-    
-    return "\n".join(lines)
+    except Exception as e:
+        logger.exception(f"Error resolving duplicate conflict {conflict_id}")
+        db.session.rollback()
+        return False

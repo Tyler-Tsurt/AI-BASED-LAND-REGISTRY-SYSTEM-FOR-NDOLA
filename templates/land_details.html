@@ -1,0 +1,351 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ listing.title }} — Ndola Land Registry{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .property-header {
+        background: linear-gradient(135deg, #0d6efd 0%, #198754 100%);
+        color: white;
+        padding: 3rem 0;
+        margin-bottom: 2rem;
+    }
+    .detail-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        margin-bottom: 1.5rem;
+    }
+    .contact-card {
+        background: linear-gradient(135deg, #198754 0%, #0d6efd 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 2rem;
+        position: sticky;
+        top: 20px;
+    }
+    .contact-card a {
+        color: white;
+        text-decoration: none;
+    }
+    .contact-card a:hover {
+        text-decoration: underline;
+    }
+    .amenity-badge {
+        background: #e7f3ff;
+        color: #0d6efd;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        display: inline-block;
+        margin: 0.25rem;
+    }
+    #propertyMap {
+        height: 400px;
+        border-radius: 8px;
+    }
+    .similar-listing {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        transition: all 0.3s ease;
+    }
+    
+    /* Dark mode support */
+    [data-theme="dark"] .detail-card,
+    [data-theme="dark"] .similar-listing {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .similar-listing:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    [data-theme="dark"] h1,
+    [data-theme="dark"] h3,
+    [data-theme="dark"] h4,
+    [data-theme="dark"] h5,
+    [data-theme="dark"] h6 {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+    [data-theme="dark"] .card {
+        background-color: #2d3748;
+        border-color: #4a5568;
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .breadcrumb-item.active {
+        color: #e2e8f0;
+    }
+    .similar-listing:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Property Header -->
+<div class="property-header">
+    <div class="container">
+        <div class="row">
+            <div class="col-12">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb text-white-50">
+                        <li class="breadcrumb-item"><a href="{{ url_for('index') }}" class="text-white">Home</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('available_lands') }}" class="text-white">Available Lands</a></li>
+                        <li class="breadcrumb-item active text-white">{{ listing.listing_reference }}</li>
+                    </ol>
+                </nav>
+                <h1 class="display-5 fw-bold mb-3">{{ listing.title }}</h1>
+                <p class="lead mb-0">
+                    <i class="fas fa-map-marker-alt me-2"></i>{{ listing.location }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container mb-5">
+    <div class="row">
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Key Details -->
+            <div class="detail-card">
+                <div class="row g-4">
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-2">Price</h6>
+                        <h4 class="text-primary fw-bold">K{{ "{:,.2f}".format(listing.asking_price) }}</h4>
+                    </div>
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-2">Size</h6>
+                        <h5>{{ listing.size }} hectares</h5>
+                    </div>
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-2">Property Type</h6>
+                        <h6><span class="badge bg-primary">{{ listing.property_type.replace('_', ' ')|title }}</span></h6>
+                    </div>
+                    <div class="col-md-3">
+                        <h6 class="text-muted mb-2">Land Use</h6>
+                        <h6><span class="badge bg-info">{{ listing.land_use|capitalize }}</span></h6>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div class="detail-card">
+                <h4 class="mb-3"><i class="fas fa-align-left me-2"></i>Description</h4>
+                <p class="text-justify">{{ listing.description }}</p>
+            </div>
+
+            <!-- Amenities -->
+            {% if listing.amenities %}
+            <div class="detail-card">
+                <h4 class="mb-3"><i class="fas fa-check-circle me-2"></i>Amenities & Features</h4>
+                <div>
+                    {% for amenity in listing.amenities %}
+                    <span class="amenity-badge">
+                        <i class="fas fa-check me-1"></i>{{ amenity.replace('_', ' ')|title }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Registration Status -->
+            <div class="detail-card">
+                <h4 class="mb-3"><i class="fas fa-certificate me-2"></i>Registration Status</h4>
+                {% if listing.is_registered %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>This property is registered and has a title deed.
+                </div>
+                {% else %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-info-circle me-2"></i>This is unregistered land. Buyers should verify ownership and complete registration process.
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Location Map -->
+            {% if listing.coordinates or (listing.latitude and listing.longitude) %}
+            <div class="detail-card">
+                <h4 class="mb-3"><i class="fas fa-map me-2"></i>Location</h4>
+                <div id="propertyMap"></div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Contact Seller Card -->
+            <div class="contact-card">
+                <h4 class="mb-4"><i class="fas fa-user-circle me-2"></i>Contact Seller</h4>
+                
+                <div class="mb-3">
+                    <h6 class="opacity-75 mb-1">Seller Name</h6>
+                    <h5 class="mb-0">{{ listing.seller_name }}</h5>
+                </div>
+                
+                <div class="mb-3">
+                    <h6 class="opacity-75 mb-1">Phone Number</h6>
+                    <h5 class="mb-0">
+                        <a href="tel:{{ listing.seller_phone }}" class="text-white">
+                            <i class="fas fa-phone me-2"></i>{{ listing.seller_phone }}
+                        </a>
+                    </h5>
+                </div>
+                
+                <div class="mb-3">
+                    <h6 class="opacity-75 mb-1">Email</h6>
+                    <h6 class="mb-0">
+                        <a href="mailto:{{ listing.seller_email }}" class="text-white">
+                            <i class="fas fa-envelope me-2"></i>{{ listing.seller_email }}
+                        </a>
+                    </h6>
+                </div>
+                
+                {% if listing.seller_whatsapp %}
+                <div class="mb-4">
+                    <h6 class="opacity-75 mb-1">WhatsApp</h6>
+                    <h6 class="mb-0">
+                        <a href="https://wa.me/{{ listing.seller_whatsapp.replace('+', '').replace(' ', '') }}" 
+                           target="_blank" class="text-white">
+                            <i class="fab fa-whatsapp me-2"></i>{{ listing.seller_whatsapp }}
+                        </a>
+                    </h6>
+                </div>
+                {% endif %}
+                
+                <hr class="bg-white opacity-25 my-4">
+                
+                <div class="d-grid gap-2">
+                    <a href="tel:{{ listing.seller_phone }}" class="btn btn-light btn-lg">
+                        <i class="fas fa-phone me-2"></i>Call Now
+                    </a>
+                    {% if listing.seller_whatsapp %}
+                    <a href="https://wa.me/{{ listing.seller_whatsapp.replace('+', '').replace(' ', '') }}" 
+                       target="_blank" class="btn btn-success btn-lg">
+                        <i class="fab fa-whatsapp me-2"></i>WhatsApp
+                    </a>
+                    {% endif %}
+                    <a href="mailto:{{ listing.seller_email }}?subject=Interest in {{ listing.title }}" 
+                       class="btn btn-outline-light btn-lg">
+                        <i class="fas fa-envelope me-2"></i>Send Email
+                    </a>
+                </div>
+            </div>
+
+            <!-- Listing Info -->
+            <div class="card mt-4">
+                <div class="card-body">
+                    <h6 class="card-title fw-bold">Listing Information</h6>
+                    <hr>
+                    <p class="mb-2"><strong>Reference:</strong> {{ listing.listing_reference }}</p>
+                    <p class="mb-2"><strong>Posted:</strong> {{ listing.created_at.strftime('%B %d, %Y') }}</p>
+                    <p class="mb-0"><strong>Views:</strong> {{ listing.view_count }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Similar Listings -->
+    {% if similar_listings %}
+    <div class="row mt-5">
+        <div class="col-12">
+            <h3 class="mb-4">Similar Listings</h3>
+        </div>
+        {% for similar in similar_listings %}
+        <div class="col-md-4 mb-4">
+            <div class="similar-listing">
+                <h5 class="mb-2">{{ similar.title }}</h5>
+                <p class="text-muted mb-2">
+                    <i class="fas fa-map-marker-alt me-1"></i>{{ similar.location }}
+                </p>
+                <p class="text-primary fw-bold mb-2">K{{ "{:,.2f}".format(similar.asking_price) }}</p>
+                <p class="mb-3">{{ similar.size }} ha</p>
+                <a href="{{ url_for('land_details', listing_id=similar.id) }}" 
+                   class="btn btn-outline-primary btn-sm">View Details</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if listing.coordinates or (listing.latitude and listing.longitude) %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Default center (Ndola)
+        let mapCenter = [-12.9684, 28.6369];
+        let mapZoom = 12;
+        
+        {% if listing.latitude and listing.longitude %}
+        mapCenter = [{{ listing.latitude }}, {{ listing.longitude }}];
+        mapZoom = 15;
+        {% endif %}
+        
+        // Initialize map
+        const map = L.map('propertyMap').setView(mapCenter, mapZoom);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        {% if listing.coordinates_geojson %}
+        // If polygon/shape coordinates exist, draw them
+        try {
+            const coordinatesData = {{ listing.coordinates_geojson|tojson|safe }};
+            
+            // Parse WKB format if needed, or use GeoJSON directly
+            if (coordinatesData && typeof coordinatesData === 'object') {
+                let geoJsonLayer;
+                
+                // Check if it's already GeoJSON format
+                if (coordinatesData.type) {
+                    geoJsonLayer = L.geoJSON(coordinatesData, {
+                        style: {
+                            color: '#0d6efd',
+                            fillColor: '#0d6efd',
+                            fillOpacity: 0.2,
+                            weight: 2
+                        }
+                    }).addTo(map);
+                    
+                    // Fit map to polygon bounds
+                    map.fitBounds(geoJsonLayer.getBounds());
+                    
+                    // Add popup to polygon
+                    geoJsonLayer.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}<br>Size: {{ listing.size }} hectares');
+                }
+            }
+        } catch (e) {
+            console.error('Error rendering coordinates:', e);
+            // Fallback to marker if polygon rendering fails
+            {% if listing.latitude and listing.longitude %}
+            const marker = L.marker([{{ listing.latitude }}, {{ listing.longitude }}]).addTo(map);
+            marker.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}').openPopup();
+            {% endif %}
+        }
+        {% elif listing.latitude and listing.longitude %}
+        // Add marker if no polygon but has lat/lng
+        const marker = L.marker([{{ listing.latitude }}, {{ listing.longitude }}]).addTo(map);
+        marker.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}<br>Size: {{ listing.size }} hectares').openPopup();
+        {% endif %}
+        
+        // Force map to refresh after a short delay
+        setTimeout(function() {
+            map.invalidateSize();
+        }, 100);
+    });
+</script>
+{% endif %}
+{% endblock %}

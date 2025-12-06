@@ -16,7 +16,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     # FIX: Increased the size of password_hash to accommodate longer hashes like scrypt
     password_hash = db.Column(db.String(256))
-    role = db.Column(db.String(20), default='citizen')  # citizen, admin, super_admin
+    role = db.Column(db.String(20), default='citizen')  # citizen, admin, super_admin, seller
     first_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
     phone_number = db.Column(db.String(20))
@@ -310,3 +310,79 @@ class NotificationLog(db.Model):
     
     def __repr__(self):
         return f'<NotificationLog {self.notification_type} to {self.recipient}>'
+
+class AvailableLand(db.Model):
+    __tablename__ = 'available_lands'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    listing_reference = db.Column(db.String(20), unique=True, nullable=False)
+    
+    # Land Information
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    location = db.Column(db.Text, nullable=False)
+    size = db.Column(db.Float, nullable=False)  # in hectares
+    land_use = db.Column(db.String(50))  # residential, commercial, agricultural, etc.
+    asking_price = db.Column(db.Float, nullable=False)  # in ZMW
+    
+    # Property Type
+    property_type = db.Column(db.String(50), nullable=False)  # unregistered_land, plot, house, commercial_property
+    is_registered = db.Column(db.Boolean, default=False)
+    
+    # Geospatial data
+    coordinates = db.Column(Geometry('POLYGON', srid=4326), nullable=True)
+    latitude = db.Column(db.Float)
+    longitude = db.Column(db.Float)
+    
+    # Seller Information
+    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    seller_name = db.Column(db.String(150), nullable=False)
+    seller_phone = db.Column(db.String(20), nullable=False)
+    seller_email = db.Column(db.String(120), nullable=False)
+    seller_whatsapp = db.Column(db.String(20))
+    
+    # Additional Details
+    amenities = db.Column(db.JSON)  # water, electricity, road access, etc.
+    images = db.Column(db.JSON)  # list of image URLs
+    documents = db.Column(db.JSON)  # list of document URLs
+    admin_comments = db.Column(db.JSON)  # admin comments, approval/rejection notes
+    
+    # Status
+    status = db.Column(db.String(20), default='pending')  # pending, active, sold, withdrawn, rejected
+    admin_approval_status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
+    approved_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    approved_at = db.Column(db.DateTime)
+    featured = db.Column(db.Boolean, default=False)
+    verified = db.Column(db.Boolean, default=False)
+    
+    # View count for analytics
+    view_count = db.Column(db.Integer, default=0)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    sold_at = db.Column(db.DateTime)
+    
+    # Relationships
+    seller = db.relationship('User', foreign_keys=[seller_id], backref='available_lands', lazy=True)
+    approver = db.relationship('User', foreign_keys=[approved_by], backref='approved_listings', lazy=True)
+    
+    def generate_listing_reference(self):
+        """Generate a unique listing reference number."""
+        year = datetime.utcnow().year
+        count = AvailableLand.query.filter(
+            AvailableLand.listing_reference.like(f'AL-{year}-%')
+        ).count() + 1
+        return f'AL-{year}-{count:04d}'
+    
+    def get_status_badge_class(self):
+        """Return Bootstrap badge class based on status."""
+        status_classes = {
+            'active': 'bg-success',
+            'sold': 'bg-secondary',
+            'withdrawn': 'bg-warning'
+        }
+        return status_classes.get(self.status, 'bg-secondary')
+    
+    def __repr__(self):
+        return f'<AvailableLand {self.listing_reference}>'

@@ -1,0 +1,478 @@
+{% extends 'base.html' %}
+
+{% block title %}Available Lands — Ndola Land Registry{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .hero-section {
+        background: linear-gradient(135deg, #0d6efd 0%, #198754 100%);
+        color: white;
+        padding: 4rem 0;
+        margin-bottom: 2rem;
+    }
+    .filter-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        margin-bottom: 2rem;
+    }
+    .land-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        height: 100%;
+    }
+    .land-card:hover {
+        box-shadow: 0 8px 16px rgba(0,0,0,0.12);
+        transform: translateY(-4px);
+    }
+    .land-image {
+        height: 200px;
+        background: linear-gradient(135deg, #0d6efd 0%, #198754 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 3rem;
+    }
+    .price-tag {
+        background: #0d6efd;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 1.25rem;
+        font-weight: bold;
+    }
+    #mapView {
+        height: 500px;
+        border-radius: 12px;
+    }
+    .view-toggle {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        padding: 0.25rem;
+    }
+    .land-type-toggle {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        padding: 0.25rem;
+        margin-bottom: 1rem;
+    }
+    .status-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1;
+    }
+    
+    /* Dark mode support */
+    [data-theme="dark"] .filter-card,
+    [data-theme="dark"] .land-card,
+    [data-theme="dark"] .view-toggle,
+    [data-theme="dark"] .land-type-toggle {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .land-card:hover {
+        box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    }
+    [data-theme="dark"] .form-control,
+    [data-theme="dark"] .form-select {
+        background-color: #374151;
+        color: #e2e8f0;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .form-label {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+    [data-theme="dark"] h4,
+    [data-theme="dark"] h5 {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .card {
+        background-color: #2d3748;
+        border-color: #4a5568;
+        color: #e2e8f0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="hero-section">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h1 class="display-4 fw-bold mb-3">Available Lands & Properties</h1>
+                <p class="lead mb-0">Browse lands, plots, and properties available for sale in Ndola</p>
+            </div>
+            <div class="col-md-4 text-end">
+                <div class="btn-group view-toggle" role="group">
+                    <button type="button" class="btn btn-primary active" id="gridViewBtn">
+                        <i class="fas fa-th-large me-1"></i> Grid
+                    </button>
+                    <button type="button" class="btn btn-outline-primary" id="mapViewBtn">
+                        <i class="fas fa-map me-1"></i> Map
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container mb-5">
+    <!-- Land Type Toggle -->
+    <div class="text-center">
+        <div class="btn-group land-type-toggle" role="group">
+            <button type="button" class="btn btn-primary active" id="unregisteredBtn" data-type="unregistered">
+                <i class="fas fa-map-marked me-1"></i> Unregistered Lands
+            </button>
+            <button type="button" class="btn btn-outline-primary" id="registeredBtn" data-type="registered">
+                <i class="fas fa-file-contract me-1"></i> Registered Lands
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-card">
+        <form method="GET" action="{{ url_for('available_lands') }}" id="filterForm">
+            <input type="hidden" name="land_type" id="landTypeInput" value="unregistered">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Property Type</label>
+                    <select name="property_type" class="form-select">
+                        <option value="">All Types</option>
+                        <option value="unregistered_land">Unregistered Land</option>
+                        <option value="plot">Plot</option>
+                        <option value="house">House with Land</option>
+                        <option value="commercial_property">Commercial Property</option>
+                        <option value="agricultural_land">Agricultural Land</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Land Use</label>
+                    <select name="land_use" class="form-select">
+                        <option value="">All Uses</option>
+                        <option value="residential">Residential</option>
+                        <option value="commercial">Commercial</option>
+                        <option value="agricultural">Agricultural</option>
+                        <option value="industrial">Industrial</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Min Price (K)</label>
+                    <input type="number" name="min_price" class="form-control" placeholder="0">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Max Price (K)</label>
+                    <input type="number" name="max_price" class="form-control" placeholder="Any">
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label">Min Size</label>
+                    <input type="number" name="min_size" step="0.1" class="form-control" placeholder="0">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search me-1"></i> Filter
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Grid View -->
+    <div id="gridView">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4 class="mb-0"><span id="listingCount">0</span> Properties Available</h4>
+        </div>
+
+        <div id="listingsContainer" class="row g-4">
+            <!-- Listings will be loaded here dynamically -->
+        </div>
+
+        <div id="noResults" class="text-center py-5" style="display: none;">
+            <i class="fas fa-search fa-4x text-muted mb-3"></i>
+            <h4 class="text-muted">No properties found</h4>
+            <p class="text-muted">Try adjusting your filters or selecting a different land type</p>
+        </div>
+    </div>
+
+    <!-- Map View (Hidden by default) -->
+    <div id="mapViewContainer" style="display: none;">
+        <div id="mapView"></div>
+        <div class="mt-3" id="mapLegend">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-2">Map Legend</h6>
+                    <div class="d-flex gap-3 flex-wrap">
+                        <div><i class="fas fa-circle text-primary me-1"></i> Unregistered Land</div>
+                        <div><i class="fas fa-circle text-success me-1"></i> Registered Land</div>
+                        <div><i class="fas fa-circle text-warning me-1"></i> Commercial</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map = null;
+    let markersLayer = null;
+    let currentLandType = 'unregistered'; // Default to unregistered
+    let currentView = 'grid'; // Track current view
+
+    // Load listings on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadListings('unregistered');
+    });
+
+    // Land type toggle functionality
+    document.getElementById('unregisteredBtn').addEventListener('click', function() {
+        switchLandType('unregistered', this);
+    });
+
+    document.getElementById('registeredBtn').addEventListener('click', function() {
+        switchLandType('registered', this);
+    });
+
+    function switchLandType(type, button) {
+        currentLandType = type;
+        
+        // Update button states
+        document.querySelectorAll('.land-type-toggle .btn').forEach(btn => {
+            btn.classList.remove('active', 'btn-primary');
+            btn.classList.add('btn-outline-primary');
+        });
+        button.classList.remove('btn-outline-primary');
+        button.classList.add('active', 'btn-primary');
+        
+        // Update hidden input
+        document.getElementById('landTypeInput').value = type;
+        
+        // Reload listings
+        if (currentView === 'grid') {
+            loadListings(type);
+        } else {
+            loadMapView(type);
+        }
+    }
+
+    // View toggle functionality
+    document.getElementById('gridViewBtn').addEventListener('click', function() {
+        currentView = 'grid';
+        document.getElementById('gridView').style.display = 'block';
+        document.getElementById('mapViewContainer').style.display = 'none';
+        this.classList.add('active', 'btn-primary');
+        this.classList.remove('btn-outline-primary');
+        document.getElementById('mapViewBtn').classList.remove('active', 'btn-primary');
+        document.getElementById('mapViewBtn').classList.add('btn-outline-primary');
+        
+        // Reload listings
+        loadListings(currentLandType);
+    });
+
+    document.getElementById('mapViewBtn').addEventListener('click', function() {
+        currentView = 'map';
+        document.getElementById('gridView').style.display = 'none';
+        document.getElementById('mapViewContainer').style.display = 'block';
+        this.classList.add('active', 'btn-primary');
+        this.classList.remove('btn-outline-primary');
+        document.getElementById('gridViewBtn').classList.remove('active', 'btn-primary');
+        document.getElementById('gridViewBtn').classList.add('btn-outline-primary');
+        
+        // Initialize map if not already done
+        if (!map) {
+            initializeMap();
+        } else {
+            loadMapView(currentLandType);
+        }
+    });
+
+    function loadListings(landType) {
+        const container = document.getElementById('listingsContainer');
+        const noResults = document.getElementById('noResults');
+        const countEl = document.getElementById('listingCount');
+        
+        // Show loading state
+        container.innerHTML = '<div class="col-12 text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading...</p></div>';
+        noResults.style.display = 'none';
+        
+        // Fetch listings from API
+        fetch(`/api/available-lands?land_type=${landType}`)
+            .then(response => response.json())
+            .then(data => {
+                container.innerHTML = '';
+                
+                if (data.listings && data.listings.length > 0) {
+                    countEl.textContent = data.listings.length;
+                    
+                    data.listings.forEach(listing => {
+                        const card = createListingCard(listing);
+                        container.appendChild(card);
+                    });
+                } else {
+                    noResults.style.display = 'block';
+                    countEl.textContent = '0';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading listings:', error);
+                container.innerHTML = '<div class="col-12 text-center py-5 text-danger"><i class="fas fa-exclamation-triangle fa-3x mb-3"></i><p>Error loading listings</p></div>';
+                countEl.textContent = '0';
+            });
+    }
+
+    function createListingCard(listing) {
+        const col = document.createElement('div');
+        col.className = 'col-md-4';
+        
+        const statusBadge = listing.is_registered 
+            ? '<span class="badge bg-success status-badge"><i class="fas fa-check-circle"></i> Registered</span>'
+            : '<span class="badge bg-info status-badge"><i class="fas fa-map-marked"></i> Unregistered</span>';
+        
+        const amenitiesList = listing.amenities && listing.amenities.length > 0
+            ? listing.amenities.slice(0, 3).map(a => 
+                `<small class="text-muted me-2"><i class="fas fa-check text-success me-1"></i>${a.replace('_', ' ')}</small>`
+              ).join('')
+            : '';
+        
+        col.innerHTML = `
+            <div class="land-card position-relative">
+                ${statusBadge}
+                <div class="land-image">
+                    <i class="fas fa-map-marked-alt"></i>
+                </div>
+                <div class="p-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="mb-0">${listing.title || 'Land Parcel'}</h5>
+                    </div>
+                    
+                    <p class="text-muted mb-2">
+                        <i class="fas fa-map-marker-alt me-1"></i>${listing.location || 'Ndola'}
+                    </p>
+                    
+                    <div class="mb-3">
+                        <span class="badge bg-info me-1">${(listing.property_type || 'land').replace('_', ' ')}</span>
+                        <span class="badge bg-secondary">${listing.size || 0} ha</span>
+                    </div>
+                    
+                    ${amenitiesList ? `<div class="mb-3">${amenitiesList}</div>` : ''}
+                    
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="price-tag">K${Number(listing.asking_price || 0).toLocaleString()}</div>
+                        <a href="${listing.details_url || '#'}" 
+                           class="btn btn-outline-primary">
+                            View Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        return col;
+    }
+
+    function initializeMap() {
+        // Initialize map centered on Ndola
+        map = L.map('mapView').setView([-12.9684, 28.6369], 12);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        markersLayer = L.layerGroup().addTo(map);
+        
+        // Load initial map data
+        loadMapView(currentLandType);
+    }
+
+    function loadMapView(landType) {
+        if (!markersLayer) return;
+        
+        // Clear existing markers
+        markersLayer.clearLayers();
+        
+        // Fetch GeoJSON data
+        fetch(`/api/available-lands-geojson?land_type=${landType}`)
+            .then(response => response.json())
+            .then(data => {
+                if (!data.features || data.features.length === 0) {
+                    return;
+                }
+                
+                // Add markers for each property
+                data.features.forEach(feature => {
+                    const coords = feature.geometry.coordinates;
+                    const props = feature.properties;
+                    
+                    // Choose marker color based on registration status
+                    let markerColor = props.is_registered ? 'green' : 'blue';
+                    if (props.property_type === 'commercial_property') {
+                        markerColor = 'orange';
+                    }
+                    
+                    // Custom icon
+                    const customIcon = L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div style="background-color: ${markerColor}; width: 25px; height: 25px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+                        iconSize: [25, 25],
+                        iconAnchor: [12, 12]
+                    });
+                    
+                    const marker = L.marker([coords[1], coords[0]], {icon: customIcon}).addTo(markersLayer);
+                    
+                    // Create popup
+                    const popupContent = `
+                        <div style="min-width: 200px">
+                            <h6 class="fw-bold mb-2">${props.title || 'Land Parcel'}</h6>
+                            <p class="mb-1"><i class="fas fa-map-marker-alt me-1"></i>${props.location || 'Ndola'}</p>
+                            <p class="mb-1"><strong>Status:</strong> ${props.is_registered ? 'Registered' : 'Unregistered'}</p>
+                            <p class="mb-1"><strong>Price:</strong> K${Number(props.asking_price || 0).toLocaleString()}</p>
+                            <p class="mb-2"><strong>Size:</strong> ${props.size || 0} ha</p>
+                            ${props.seller_phone ? `<p class="mb-2"><i class="fas fa-phone me-1"></i>${props.seller_phone}</p>` : ''}
+                            <a href="${props.details_url || '#'}" class="btn btn-sm btn-primary w-100">
+                                View Details
+                            </a>
+                        </div>
+                    `;
+                    
+                    marker.bindPopup(popupContent);
+                });
+
+                // Fit map to markers bounds if there are any
+                if (data.features.length > 0) {
+                    const bounds = markersLayer.getBounds();
+                    if (bounds.isValid()) {
+                        map.fitBounds(bounds, { padding: [50, 50] });
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error loading map data:', error);
+            });
+    }
+
+    // Form submission handling
+    document.getElementById('filterForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        // You can add filter logic here if needed
+        loadListings(currentLandType);
+    });
+</script>
+{% endblock %}

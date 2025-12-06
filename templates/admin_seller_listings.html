@@ -1,0 +1,279 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage Seller Listings — Admin{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+    .admin-header {
+        background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+        color: white;
+        padding: 2rem 0;
+        margin-bottom: 2rem;
+    }
+    .listing-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        background: var(--bs-body-bg);
+        transition: all 0.3s;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .listing-card:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+    }
+    .status-tabs {
+        background: var(--bs-body-bg);
+        border-radius: 12px;
+        padding: 0.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .status-tabs .nav-link {
+        color: var(--bs-body-color);
+        border-radius: 8px;
+        padding: 0.75rem 1.5rem;
+        margin: 0 0.25rem;
+        transition: all 0.3s;
+    }
+    .status-tabs .nav-link.active {
+        background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+        color: white;
+    }
+    .status-tabs .nav-link:hover:not(.active) {
+        background: var(--bs-secondary-bg);
+    }
+    .badge-count {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        margin-left: 0.5rem;
+    }
+    
+    [data-theme="dark"] .listing-card {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .status-tabs {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] h1, [data-theme="dark"] h2, 
+    [data-theme="dark"] h3, [data-theme="dark"] h4,
+    [data-theme="dark"] h5 {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Admin Header -->
+<div class="admin-header">
+    <div class="container">
+        <h1 class="mb-2">
+            <i class="fas fa-tasks me-2"></i>Manage Seller Listings
+        </h1>
+        <p class="mb-0">Review, approve, and manage land listings from sellers</p>
+    </div>
+</div>
+
+<div class="container mb-5">
+    <!-- Status Tabs -->
+    <div class="status-tabs">
+        <ul class="nav nav-pills justify-content-center" role="tablist">
+            <li class="nav-item" role="presentation">
+                <a class="nav-link {% if status_filter == 'pending' %}active{% endif %}" 
+                   href="{{ url_for('admin_seller_listings', status='pending') }}">
+                    <i class="fas fa-clock me-2"></i>Pending
+                    <span class="badge bg-warning text-dark badge-count">{{ pending_count }}</span>
+                </a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link {% if status_filter == 'approved' %}active{% endif %}" 
+                   href="{{ url_for('admin_seller_listings', status='approved') }}">
+                    <i class="fas fa-check-circle me-2"></i>Approved
+                    <span class="badge bg-success badge-count">{{ approved_count }}</span>
+                </a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link {% if status_filter == 'rejected' %}active{% endif %}" 
+                   href="{{ url_for('admin_seller_listings', status='rejected') }}">
+                    <i class="fas fa-times-circle me-2"></i>Rejected
+                    <span class="badge bg-danger badge-count">{{ rejected_count }}</span>
+                </a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link {% if status_filter == 'all' %}active{% endif %}" 
+                   href="{{ url_for('admin_seller_listings', status='all') }}">
+                    <i class="fas fa-list me-2"></i>All
+                    <span class="badge bg-secondary badge-count">{{ pending_count + approved_count + rejected_count }}</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Listings Display -->
+    <div class="row">
+        <div class="col-12">
+            {% if listings %}
+                <h4 class="mb-3">
+                    {% if status_filter == 'pending' %}
+                    Pending Approval ({{ listings|length }})
+                    {% elif status_filter == 'approved' %}
+                    Approved Listings ({{ listings|length }})
+                    {% elif status_filter == 'rejected' %}
+                    Rejected Listings ({{ listings|length }})
+                    {% else %}
+                    All Listings ({{ listings|length }})
+                    {% endif %}
+                </h4>
+
+                {% for listing in listings %}
+                <div class="listing-card">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="d-flex align-items-center mb-2">
+                                <h5 class="mb-0 me-3"><strong>{{ listing.title }}</strong></h5>
+                                {% if listing.admin_approval_status == 'pending' %}
+                                <span class="badge bg-warning text-dark">
+                                    <i class="fas fa-clock me-1"></i>Pending
+                                </span>
+                                {% elif listing.admin_approval_status == 'approved' %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check-circle me-1"></i>Approved
+                                </span>
+                                {% else %}
+                                <span class="badge bg-danger">
+                                    <i class="fas fa-times-circle me-1"></i>Rejected
+                                </span>
+                                {% endif %}
+                                
+                                {% if listing.is_registered %}
+                                <span class="badge bg-info ms-2">
+                                    <i class="fas fa-certificate me-1"></i>Registered
+                                </span>
+                                {% endif %}
+                            </div>
+                            
+                            <p class="mb-2 text-muted">
+                                <i class="fas fa-tag me-1"></i><strong>{{ listing.listing_reference }}</strong> |
+                                <i class="fas fa-map-marker-alt me-1"></i>{{ listing.location }} |
+                                <i class="fas fa-ruler me-1"></i>{{ listing.size }} ha
+                            </p>
+                            
+                            <p class="mb-2">
+                                <strong>Price:</strong> <span class="text-primary">K{{ "{:,.2f}".format(listing.asking_price) }}</span> |
+                                <strong>Type:</strong> {{ listing.property_type.replace('_', ' ')|title }} |
+                                <strong>Use:</strong> {{ listing.land_use|capitalize }}
+                            </p>
+                            
+                            <p class="mb-2">
+                                <strong>Seller:</strong> {{ listing.seller_name }} 
+                                (<a href="tel:{{ listing.seller_phone }}">{{ listing.seller_phone }}</a>) |
+                                <strong>Submitted:</strong> {{ listing.created_at.strftime('%Y-%m-%d %H:%M') }}
+                            </p>
+                            
+                            {% if listing.amenities %}
+                            <p class="mb-2">
+                                <strong>Amenities:</strong>
+                                {% for amenity in listing.amenities[:3] %}
+                                <span class="badge bg-light text-dark me-1">{{ amenity.replace('_', ' ')|title }}</span>
+                                {% endfor %}
+                                {% if listing.amenities|length > 3 %}
+                                <span class="badge bg-light text-dark">+{{ listing.amenities|length - 3 }} more</span>
+                                {% endif %}
+                            </p>
+                            {% endif %}
+                            
+                            <p class="mb-0 small text-muted">
+                                {{ listing.description[:200] }}{% if listing.description|length > 200 %}...{% endif %}
+                            </p>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <div class="d-grid gap-2">
+                                <!-- View Details Button (Primary Action) -->
+                                <a href="{{ url_for('view_seller_listing_admin', listing_id=listing.id) }}" 
+                                   class="btn btn-primary">
+                                    <i class="fas fa-eye me-2"></i>View Full Details
+                                </a>
+                                
+                                {% if listing.admin_approval_status == 'pending' %}
+                                <!-- Quick Approve -->
+                                <form method="POST" action="{{ url_for('approve_seller_listing', listing_id=listing.id) }}" 
+                                      onsubmit="return confirm('Approve this listing?');">
+                                    <button type="submit" class="btn btn-success w-100">
+                                        <i class="fas fa-check-circle me-2"></i>Quick Approve
+                                    </button>
+                                </form>
+                                {% endif %}
+                                
+                                <!-- View Public Page -->
+                                <a href="{{ url_for('land_details', listing_id=listing.id) }}" 
+                                   class="btn btn-outline-secondary" target="_blank">
+                                    <i class="fas fa-external-link-alt me-2"></i>Public Page
+                                </a>
+                            </div>
+                            
+                            <!-- Stats -->
+                            <div class="mt-3 text-center">
+                                <small class="text-muted d-block">
+                                    <i class="fas fa-eye me-1"></i>{{ listing.view_count }} views
+                                </small>
+                                {% if listing.approved_at %}
+                                <small class="text-muted d-block">
+                                    Approved: {{ listing.approved_at.strftime('%Y-%m-%d') }}
+                                </small>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+
+            {% else %}
+                <!-- Empty State -->
+                <div class="text-center py-5">
+                    <i class="fas fa-inbox fa-4x text-muted mb-3"></i>
+                    <h4 class="text-muted">
+                        {% if status_filter == 'pending' %}
+                        No pending listings to review
+                        {% elif status_filter == 'approved' %}
+                        No approved listings yet
+                        {% elif status_filter == 'rejected' %}
+                        No rejected listings
+                        {% else %}
+                        No listings available
+                        {% endif %}
+                    </h4>
+                    <p class="text-muted">
+                        {% if status_filter == 'pending' %}
+                        All caught up! Check back later for new submissions.
+                        {% else %}
+                        Try switching to a different tab to view listings.
+                        {% endif %}
+                    </p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Auto-dismiss flash messages after 5 seconds
+    setTimeout(function() {
+        const alerts = document.querySelectorAll('.alert');
+        alerts.forEach(alert => {
+            const bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        });
+    }, 5000);
+</script>
+{% endblock %}

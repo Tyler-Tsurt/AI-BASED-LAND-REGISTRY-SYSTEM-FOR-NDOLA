@@ -12,14 +12,46 @@
             cursor: pointer;
             background-color: #f8f9fa;
         }
-        .collapse-enter {
-            opacity: 0;
-            max-height: 0;
-            transition: all 0.5s ease;
+        
+        html[data-theme="dark"] .application-summary:hover {
+            background-color: rgba(255, 255, 255, 0.05);
         }
-        .collapse-enter.show {
-            opacity: 1;
-            max-height: 2000px; /* Arbitrary large value to allow full expansion */
+        
+        /* Conflict accordion styles */
+        .conflict-accordion .accordion-button {
+            background-color: #f8f9fa;
+            font-size: 0.95rem;
+            padding: 0.75rem 1rem;
+        }
+        
+        html[data-theme="dark"] .conflict-accordion .accordion-button {
+            background-color: #0b2233;
+            color: var(--dark-color);
+        }
+        
+        .conflict-accordion .accordion-button:not(.collapsed) {
+            background-color: #e9ecef;
+            color: #000;
+        }
+        
+        html[data-theme="dark"] .conflict-accordion .accordion-button:not(.collapsed) {
+            background-color: #071a2b;
+            color: var(--dark-color);
+        }
+        
+        /* Ensure proper z-index and overflow for main accordion */
+        .accordion-item {
+            position: relative;
+            overflow: visible;
+        }
+        
+        .accordion-collapse {
+            overflow: visible;
+        }
+        
+        .accordion-body {
+            overflow: visible;
+            max-height: none;
         }
     </style>
 </head>
@@ -231,13 +263,13 @@
                             </h4>
                             <div class="alert alert-warning mb-3">
                                 <strong><i class="fas fa-info-circle me-2"></i>Attention Required:</strong> 
-                                Your application has been flagged by our AI system for potential conflicts. Please review the details below carefully.
+                                Your application has been flagged by our AI system for potential conflicts. Click on each conflict below to view detailed information.
                             </div>
-                            <div class="accordion" id="conflictsAccordionApp{{ application.id }}">
+                            <div class="accordion conflict-accordion" id="conflictsAccordionApp{{ application.id }}">
                                 {% for conflict in application.conflicts %}
-                                <div class="accordion-item mb-2">
+                                <div class="accordion-item mb-2 shadow-sm">
                                     <h2 class="accordion-header" id="conflictHeadingApp{{ application.id }}_{{ conflict.id }}">
-                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#conflictCollapseApp{{ application.id }}_{{ conflict.id }}" aria-expanded="false">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#conflictCollapseApp{{ application.id }}_{{ conflict.id }}" aria-expanded="false" aria-controls="conflictCollapseApp{{ application.id }}_{{ conflict.id }}">
                                             <div class="d-flex justify-content-between w-100 align-items-center me-3">
                                                 <div>
                                                     <strong>{{ conflict.title or ("Conflict #" ~ conflict.id) }}</strong>
@@ -256,7 +288,7 @@
                                             </div>
                                         </button>
                                     </h2>
-                                    <div id="conflictCollapseApp{{ application.id }}_{{ conflict.id }}" class="accordion-collapse collapse" data-bs-parent="#conflictsAccordionApp{{ application.id }}">
+                                    <div id="conflictCollapseApp{{ application.id }}_{{ conflict.id }}" class="accordion-collapse collapse" aria-labelledby="conflictHeadingApp{{ application.id }}_{{ conflict.id }}">
                                         <div class="accordion-body">
                                             <div class="card border-{{ 'danger' if conflict.severity == 'high' else 'warning' }}">
                                                 <div class="card-body">
@@ -303,8 +335,28 @@
                         </div>
                         {% endif %}
 
+                        <!-- Contact Details -->
+                        <div class="form-card mb-4">
+                            <h4 class="section-title"><i class="fas fa-phone me-2"></i>Contact Information</h4>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6 class="text-primary">Ndola City Council</h6>
+                                    <p class="mb-1"><i class="fas fa-map-marker-alt me-2"></i>Civic Centre, Independence Way</p>
+                                    <p class="mb-1"><i class="fas fa-map-marker-alt me-2"></i>P.O. Box 70197, Ndola, Zambia</p>
+                                    <p class="mb-1"><i class="fas fa-phone me-2"></i>+260 212 613 001 / +260 212 680 668</p>
+                                    <p class="mb-0"><i class="fas fa-envelope me-2"></i>info@ndolacouncil.gov.zm</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6 class="text-primary">Office Hours</h6>
+                                    <p class="mb-1"><i class="fas fa-clock me-2"></i>Monday - Friday: 8:00 AM - 5:00 PM</p>
+                                    <p class="mb-1"><i class="fas fa-clock me-2"></i>Saturday: 8:00 AM - 12:00 PM</p>
+                                    <p class="mb-0"><i class="fas fa-times-circle me-2"></i>Sunday: Closed</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Actions -->
-                        <div class="text-center mb-5">
+                        <div class="text-center mb-4">
                             <a href="{{ url_for('index') }}" class="btn btn-primary btn-lg me-3"><i class="fas fa-home me-2"></i>Back to Home</a>
                             {% if application.status == 'approved' %}
                             <a href="{{ url_for('download_certificate', app_id=application.id) }}" class="btn btn-success btn-lg me-3" target="_blank">
@@ -348,14 +400,18 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
 <script>
-    // Optional: Smooth collapse animation
-    const collapseElements = document.querySelectorAll('.accordion-collapse');
-    collapseElements.forEach(el => {
-        el.addEventListener('show.bs.collapse', function () {
-            el.classList.add('show');
-        });
-        el.addEventListener('hide.bs.collapse', function () {
-            el.classList.remove('show');
+    // Ensure conflict accordions collapse properly and don't interfere with parent
+    document.addEventListener('DOMContentLoaded', function() {
+        // Handle nested accordions without data-bs-parent to prevent conflicts
+        const conflictAccordions = document.querySelectorAll('.conflict-accordion .accordion-collapse');
+        conflictAccordions.forEach(el => {
+            el.addEventListener('show.bs.collapse', function(e) {
+                // Stop propagation to prevent parent accordion from closing
+                e.stopPropagation();
+            });
+            el.addEventListener('hide.bs.collapse', function(e) {
+                e.stopPropagation();
+            });
         });
     });
 </script>

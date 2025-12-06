@@ -1,0 +1,744 @@
+{% extends 'base.html' %}
+
+{% block title %}Post Land — Ndola Land Registry{% endblock %}
+
+{% block head %}
+<!-- IMPORTANT: Load Leaflet CSS first before any other styles -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+      crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+    .form-section {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .section-title {
+        border-bottom: 2px solid #0d6efd;
+        padding-bottom: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    #map {
+        height: 450px;
+        border-radius: 8px;
+        border: 2px solid #e9ecef;
+        z-index: 1;
+    }
+    .map-controls {
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .amenity-checkbox {
+        padding: 1rem;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    .amenity-checkbox:hover {
+        border-color: #0d6efd;
+        background: var(--bs-secondary-bg);
+    }
+    
+    /* Leaflet draw toolbar styling */
+    .leaflet-draw-toolbar {
+        margin-top: 10px !important;
+    }
+    
+    /* Dark mode support */
+    [data-theme="dark"] .form-section {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] #map {
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .amenity-checkbox {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .amenity-checkbox:hover {
+        background: #374151;
+    }
+    [data-theme="dark"] .section-title {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .form-control,
+    [data-theme="dark"] .form-select,
+    [data-theme="dark"] textarea {
+        background-color: #374151;
+        color: #e2e8f0;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .form-label {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+    [data-theme="dark"] h2,
+    [data-theme="dark"] h4 {
+        color: #e2e8f0;
+    }
+    .amenity-checkbox input:checked + label {
+        color: #0d6efd;
+        font-weight: 600;
+    }
+    .map-instruction {
+        background: #e7f3ff;
+        border-left: 4px solid #0d6efd;
+        padding: 12px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+    }
+    [data-theme="dark"] .map-instruction {
+        background: #1e3a5f;
+        border-left-color: #3b82f6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row">
+        <div class="col-lg-10 mx-auto">
+            <div class="mb-4">
+                <h2 class="fw-bold"><i class="fas fa-plus-circle me-2"></i>Post New Land Listing</h2>
+                <p class="text-muted">Fill in the details below to list your property</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('post_land') }}" enctype="multipart/form-data">
+                <!-- Basic Information -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-info-circle me-2"></i>Basic Information</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" name="title" class="form-control" required 
+                                   placeholder="e.g., Spacious Residential Plot in Kansenshi">
+                        </div>
+                        
+                        <div class="col-md-12">
+                            <label class="form-label">Description <span class="text-danger">*</span></label>
+                            <textarea name="description" class="form-control" rows="4" required 
+                                      placeholder="Provide detailed description of the property..."></textarea>
+                        </div>
+                        
+                        <div class="col-md-8">
+                            <label class="form-label">Location <span class="text-danger">*</span></label>
+                            <input type="text" name="location" id="locationInput" class="form-control" required 
+                                   placeholder="e.g., Kansenshi, Ndola">
+                            <small class="form-text text-muted">
+                                <i class="fas fa-lightbulb me-1"></i>Type a location to search and zoom the map
+                            </small>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label">Size (hectares) <span class="text-danger">*</span></label>
+                            <input type="number" name="size" step="0.01" class="form-control" required>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Property Details -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-home me-2"></i>Property Details</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Property Type <span class="text-danger">*</span></label>
+                            <select name="property_type" class="form-select" required>
+                                <option value="">Select type...</option>
+                                <option value="unregistered_land">Unregistered Land</option>
+                                <option value="plot">Plot</option>
+                                <option value="house">House with Land</option>
+                                <option value="commercial_property">Commercial Property</option>
+                                <option value="agricultural_land">Agricultural Land</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Land Use <span class="text-danger">*</span></label>
+                            <select name="land_use" class="form-select" required>
+                                <option value="">Select use...</option>
+                                <option value="residential">Residential</option>
+                                <option value="commercial">Commercial</option>
+                                <option value="agricultural">Agricultural</option>
+                                <option value="industrial">Industrial</option>
+                                <option value="mixed">Mixed Use</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Asking Price (ZMW) <span class="text-danger">*</span></label>
+                            <input type="number" name="asking_price" step="0.01" class="form-control" required>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Is this land registered? <span class="text-danger">*</span></label>
+                            <select name="is_registered" class="form-select" required>
+                                <option value="no">No - Unregistered Land</option>
+                                <option value="yes">Yes - Has Title Deed</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Amenities -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-plug me-2"></i>Amenities</h4>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="water" id="water">
+                                    <label class="form-check-label" for="water">
+                                        <i class="fas fa-tint me-2"></i>Water Available
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="electricity" id="electricity">
+                                    <label class="form-check-label" for="electricity">
+                                        <i class="fas fa-bolt me-2"></i>Electricity
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="road_access" id="road_access">
+                                    <label class="form-check-label" for="road_access">
+                                        <i class="fas fa-road me-2"></i>Road Access
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="fence" id="fence">
+                                    <label class="form-check-label" for="fence">
+                                        <i class="fas fa-border-style me-2"></i>Fenced
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="title_deed" id="title_deed">
+                                    <label class="form-check-label" for="title_deed">
+                                        <i class="fas fa-certificate me-2"></i>Title Deed Available
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-phone me-2"></i>Contact Information</h4>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Phone Number <span class="text-danger">*</span></label>
+                            <input type="tel" name="seller_phone" class="form-control" 
+                                   value="{{ current_user.phone_number }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Email <span class="text-danger">*</span></label>
+                            <input type="email" name="seller_email" class="form-control" 
+                                   value="{{ current_user.email }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">WhatsApp (Optional)</label>
+                            <input type="tel" name="seller_whatsapp" class="form-control" 
+                                   placeholder="+260...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Uploads -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-file-upload me-2"></i>Property Images & Documents</h4>
+                    
+                    <div class="row g-3">
+                        <!-- Property Images (Public) -->
+                        <div class="col-md-6">
+                            <label class="form-label">Property Images <span class="text-muted">(Public - Visible to all users)</span></label>
+                            <input type="file" name="property_images" id="property_images" 
+                                   class="form-control" accept="image/*" multiple>
+                            <small class="form-text text-muted">
+                                <i class="fas fa-info-circle me-1"></i>Upload multiple images of the property location. Max 10 images.
+                            </small>
+                            <div id="image-preview" class="mt-2 d-flex flex-wrap gap-2"></div>
+                        </div>
+                        
+                        <!-- Supporting Documents (Admin Only) -->
+                        <div class="col-md-6">
+                            <label class="form-label">Supporting Documents <span class="text-muted">(Admin Only - NRC, Title Deeds, etc.)</span></label>
+                            <input type="file" name="supporting_documents" id="supporting_documents" 
+                                   class="form-control" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple>
+                            <small class="form-text text-muted">
+                                <i class="fas fa-lock me-1"></i>These documents will only be visible to administrators. Upload NRC, Title Deeds, and other supporting documents.
+                            </small>
+                            <div id="document-list" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Map Location -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-map-marker-alt me-2"></i>Mark Property Location (Optional)</h4>
+                    <div class="map-instruction">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>How to mark your property:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Use the drawing tools on the left side of the map</li>
+                            <li>Click the marker icon to place a point, or use the polygon tool to draw the property boundary</li>
+                            <li>Type your location in the "Location" field above to automatically zoom to the area</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="map-controls">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnUseLocation">
+                            <i class="fas fa-crosshairs me-1"></i>Use My Location
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearMap">
+                            <i class="fas fa-trash me-1"></i>Clear Markers
+                        </button>
+                    </div>
+                    
+                    <div id="map"></div>
+                    <input type="hidden" name="coordinates" id="coordinates">
+                    <small class="form-text text-muted mt-2 d-block">
+                        <i class="fas fa-check-circle me-1"></i>
+                        <span id="mapStatus">No location marked yet</span>
+                    </small>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="text-center">
+                    <button type="submit" class="btn btn-primary btn-lg px-5">
+                        <i class="fas fa-check-circle me-2"></i>Post Listing
+                    </button>
+                    <a href="{{ url_for('seller_dashboard') }}" class="btn btn-outline-secondary btn-lg px-5 ms-2">
+                        <i class="fas fa-times me-2"></i>Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- IMPORTANT: Load Leaflet JS with integrity check -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script>
+    // Global variables
+    let map, drawnItems, searchMarker;
+    let mapReady = false;
+    let initAttempts = 0;
+    const MAX_INIT_ATTEMPTS = 10;
+
+    function initializeMapWithRetry() {
+        console.log('=== MAP INITIALIZATION START ===');
+        console.log('Attempt:', ++initAttempts);
+        
+        // Check if Leaflet is loaded
+        if (typeof L === 'undefined') {
+            console.error('❌ Leaflet not loaded');
+            if (initAttempts < MAX_INIT_ATTEMPTS) {
+                console.log('⏳ Retrying in 500ms...');
+                setTimeout(initializeMapWithRetry, 500);
+            } else {
+                alert('Failed to load map library. Please refresh the page.');
+            }
+            return;
+        }
+        
+        console.log('✓ Leaflet loaded');
+        
+        // Check if map container exists and is visible
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer) {
+            console.error('Map container element not found!');
+            return;
+        }
+        
+        console.log('Map container found, dimensions:', mapContainer.offsetWidth, 'x', mapContainer.offsetHeight);
+        
+        // Ensure container has dimensions
+        if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
+            console.log('⏳ Container has no dimensions, waiting...');
+            if (initAttempts < MAX_INIT_ATTEMPTS) {
+                setTimeout(initializeMapWithRetry, 300);
+            }
+            return;
+        }
+        
+        try {
+            console.log('Creating Leaflet map instance...');
+            
+            // Initialize map centered on Ndola with better view
+            map = L.map('map', {
+                center: [-12.9684, 28.6369],
+                zoom: 13,
+                zoomControl: true,
+                doubleClickZoom: true
+            });
+            
+            console.log('Map instance created');
+            
+            // Add tile layer with error handling
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+                errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+            }).addTo(map);
+            
+            console.log('Tile layer added');
+            
+            // Initialize drawn items layer
+            drawnItems = new L.FeatureGroup();
+            map.addLayer(drawnItems);
+            
+            // Add drawing controls with better options
+            const drawControl = new L.Control.Draw({
+                position: 'topleft',
+                draw: {
+                    polygon: {
+                        allowIntersection: false,
+                        showArea: true,
+                        drawError: {
+                            color: '#e74c3c',
+                            message: 'Error: Shape edges cannot cross!'
+                        },
+                        shapeOptions: {
+                            color: '#3388ff',
+                            weight: 3
+                        }
+                    },
+                    marker: {
+                        icon: L.icon({
+                            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                            popupAnchor: [1, -34],
+                            shadowSize: [41, 41]
+                        })
+                    },
+                    rectangle: {
+                        shapeOptions: {
+                            color: '#3388ff',
+                            weight: 3
+                        }
+                    },
+                    polyline: false,
+                    circle: false,
+                    circlemarker: false
+                },
+                edit: {
+                    featureGroup: drawnItems,
+                    remove: true
+                }
+            });
+            map.addControl(drawControl);
+            
+            console.log('Draw controls added');
+            
+            // Handle drawing creation
+            map.on(L.Draw.Event.CREATED, function(event) {
+                const layer = event.layer;
+                
+                // Clear previous drawings
+                drawnItems.clearLayers();
+                
+                // Add new drawing
+                drawnItems.addLayer(layer);
+                
+                // Convert to GeoJSON and store
+                const geojson = layer.toGeoJSON();
+                document.getElementById('coordinates').value = JSON.stringify(geojson.geometry);
+                
+                // Update status
+                document.getElementById('mapStatus').innerHTML = 
+                    '<span class="text-success"><i class="fas fa-check-circle me-1"></i>Location marked on map</span>';
+                
+                console.log('Location marked:', geojson.geometry);
+            });
+            
+            // Handle editing
+            map.on(L.Draw.Event.EDITED, function(event) {
+                const layers = event.layers;
+                layers.eachLayer(function(layer) {
+                    const geojson = layer.toGeoJSON();
+                    document.getElementById('coordinates').value = JSON.stringify(geojson.geometry);
+                });
+            });
+            
+            // Handle deletion
+            map.on(L.Draw.Event.DELETED, function() {
+                document.getElementById('coordinates').value = '';
+                document.getElementById('mapStatus').innerHTML = '<span class="text-muted">No location marked yet</span>';
+            });
+            
+            // Set map ready flag
+            mapReady = true;
+            console.log('✅ MAP INITIALIZATION COMPLETE');
+            console.log('=== MAP IS READY TO USE ===');
+            
+            // Force map to recalculate size
+            setTimeout(function() {
+                if (map) {
+                    map.invalidateSize();
+                    console.log('✓ Map resized');
+                }
+            }, 100);
+            
+        } catch (error) {
+            console.error('Error initializing map:', error);
+            alert('Error initializing map: ' + error.message);
+        }
+    }
+
+    // Initialize map when page loads - with better timing
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('=== MAP INITIALIZATION START ===');
+        
+        // Give page time to fully render before trying to initialize map
+        setTimeout(initializeMapWithRetry, 100);
+        
+        // Location search functionality
+        const locationInput = document.getElementById('locationInput');
+        if (locationInput) {
+            let searchTimeout;
+            
+            locationInput.addEventListener('input', function(e) {
+                clearTimeout(searchTimeout);
+                const query = e.target.value.trim();
+                
+                if (query.length < 3) return;
+                
+                searchTimeout = setTimeout(async () => {
+                    try {
+                        const response = await fetch(
+                            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Ndola, Zambia')}&limit=1`
+                        );
+                        const data = await response.json();
+                        
+                        if (data && data.length > 0 && map && mapReady) {
+                            const result = data[0];
+                            const lat = parseFloat(result.lat);
+                            const lon = parseFloat(result.lon);
+                            
+                            // Move map to location
+                            map.setView([lat, lon], 16);
+                            
+                            // Add temporary search marker
+                            if (searchMarker) {
+                                map.removeLayer(searchMarker);
+                            }
+                            searchMarker = L.marker([lat, lon], {
+                                icon: L.icon({
+                                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                                    iconSize: [25, 41],
+                                    iconAnchor: [12, 41],
+                                    popupAnchor: [1, -34],
+                                    shadowSize: [41, 41]
+                                })
+                            }).addTo(map);
+                            
+                            searchMarker.bindPopup(`<b>${result.display_name}</b><br><small>Use drawing tools to mark your property</small>`).openPopup();
+                            
+                            // Remove search marker after 5 seconds
+                            setTimeout(() => {
+                                if (searchMarker && map) {
+                                    map.removeLayer(searchMarker);
+                                    searchMarker = null;
+                                }
+                            }, 5000);
+                        }
+                    } catch (err) {
+                        console.log('Geocoding error:', err);
+                    }
+                }, 800);
+            });
+        }
+        
+        // Use my location button
+        const btnUseLocation = document.getElementById('btnUseLocation');
+        if (btnUseLocation) {
+            btnUseLocation.addEventListener('click', function() {
+                if (!map || !mapReady) {
+                    alert('Map is not ready. Please wait a moment and try again.');
+                    return;
+                }
+                
+                if (!navigator.geolocation) {
+                    alert('Geolocation is not supported by your browser');
+                    return;
+                }
+                
+                btnUseLocation.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Getting location...';
+                btnUseLocation.disabled = true;
+                
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        
+                        map.setView([lat, lng], 17);
+                        
+                        // Clear previous drawings
+                        drawnItems.clearLayers();
+                        
+                        // Add marker at user's location
+                        const marker = L.marker([lat, lng], {
+                            icon: L.icon({
+                                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                                iconSize: [25, 41],
+                                iconAnchor: [12, 41],
+                                popupAnchor: [1, -34],
+                                shadowSize: [41, 41]
+                            })
+                        }).addTo(drawnItems);
+                        
+                        // Save coordinates
+                        const geojson = marker.toGeoJSON();
+                        document.getElementById('coordinates').value = JSON.stringify(geojson.geometry);
+                        document.getElementById('mapStatus').innerHTML = 
+                            '<span class="text-success"><i class="fas fa-check-circle me-1"></i>Your location marked</span>';
+                        
+                        btnUseLocation.innerHTML = '<i class="fas fa-crosshairs me-1"></i>Use My Location';
+                        btnUseLocation.disabled = false;
+                    },
+                    function(error) {
+                        alert('Error getting your location: ' + error.message);
+                        btnUseLocation.innerHTML = '<i class="fas fa-crosshairs me-1"></i>Use My Location';
+                        btnUseLocation.disabled = false;
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
+            });
+        }
+        
+        // Clear map button
+        const btnClearMap = document.getElementById('btnClearMap');
+        if (btnClearMap) {
+            btnClearMap.addEventListener('click', function() {
+                if (map && drawnItems) {
+                    drawnItems.clearLayers();
+                    document.getElementById('coordinates').value = '';
+                    document.getElementById('mapStatus').innerHTML = '<span class="text-muted">No location marked yet</span>';
+                    if (searchMarker && map) {
+                        map.removeLayer(searchMarker);
+                        searchMarker = null;
+                    }
+                }
+            });
+        }
+        
+        // File upload previews
+        const propertyImagesInput = document.getElementById('property_images');
+        const imagePreview = document.getElementById('image-preview');
+        
+        if (propertyImagesInput) {
+            propertyImagesInput.addEventListener('change', function(e) {
+                const files = Array.from(e.target.files).slice(0, 10); // Max 10 images
+                imagePreview.innerHTML = '';
+                
+                files.forEach((file, index) => {
+                    if (file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = function(event) {
+                            const div = document.createElement('div');
+                            div.style.cssText = 'position: relative; width: 100px; height: 100px;';
+                            div.innerHTML = `
+                                <img src="${event.target.result}" 
+                                     style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 2px solid #e9ecef;" 
+                                     alt="Preview ${index + 1}">
+                                <span style="position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.5); color: white; border-radius: 4px; padding: 2px 6px; font-size: 10px;">
+                                    ${index + 1}
+                                </span>
+                            `;
+                            imagePreview.appendChild(div);
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+                
+                if (files.length > 0) {
+                    imagePreview.insertAdjacentHTML('beforeend', 
+                        `<small class="text-muted w-100 mt-2">${files.length} image(s) selected</small>`);
+                }
+            });
+        }
+        
+        const supportingDocsInput = document.getElementById('supporting_documents');
+        const documentList = document.getElementById('document-list');
+        
+        if (supportingDocsInput) {
+            supportingDocsInput.addEventListener('change', function(e) {
+                const files = Array.from(e.target.files);
+                documentList.innerHTML = '';
+                
+                if (files.length > 0) {
+                    const ul = document.createElement('ul');
+                    ul.className = 'list-group list-group-flush';
+                    
+                    files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item d-flex justify-content-between align-items-center py-1 px-2';
+                        
+                        const icon = file.type === 'application/pdf' ? 'fa-file-pdf text-danger' : 
+                                    file.type.startsWith('image/') ? 'fa-file-image text-primary' :
+                                    'fa-file-word text-info';
+                        
+                        li.innerHTML = `
+                            <span><i class="fas ${icon} me-2"></i>${file.name}</span>
+                            <span class="badge bg-secondary">${(file.size / 1024).toFixed(1)} KB</span>
+                        `;
+                        ul.appendChild(li);
+                    });
+                    
+                    documentList.appendChild(ul);
+                }
+            });
+        }
+    });
+    
+    // Handle tab visibility changes - reinitialize map if needed
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && map && mapReady) {
+            // Map might be in hidden state, reinitialize size
+            setTimeout(() => {
+                if (map) {
+                    map.invalidateSize();
+                }
+            }, 100);
+        }
+    });
+</script>
+{% endblock %}

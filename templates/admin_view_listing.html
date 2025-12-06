@@ -1,0 +1,416 @@
+{% extends 'base.html' %}
+
+{% block title %}Review Listing {{ listing.listing_reference }} — Admin{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    .admin-header {
+        background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+        color: white;
+        padding: 2rem 0;
+        margin-bottom: 2rem;
+    }
+    .detail-section {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .action-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        position: sticky;
+        top: 20px;
+    }
+    #propertyMap {
+        height: 350px;
+        border-radius: 8px;
+    }
+    .status-badge-large {
+        font-size: 1.1rem;
+        padding: 0.5rem 1rem;
+    }
+    .comment-box {
+        background: #f8f9fa;
+        border-left: 3px solid #0d6efd;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+        border-radius: 4px;
+    }
+    
+    [data-theme="dark"] .detail-section,
+    [data-theme="dark"] .action-card {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .comment-box {
+        background: #374151;
+        border-left-color: #3b82f6;
+    }
+    [data-theme="dark"] h1, [data-theme="dark"] h3,
+    [data-theme="dark"] h4, [data-theme="dark"] h5 {
+        color: #e2e8f0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Admin Header -->
+<div class="admin-header">
+    <div class="container">
+        <h1 class="mb-2">
+            <i class="fas fa-clipboard-check me-2"></i>Review Seller Listing
+        </h1>
+        <p class="mb-0">Reference: {{ listing.listing_reference }}</p>
+    </div>
+</div>
+
+<div class="container mb-5">
+    <div class="row">
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Status & Basic Info -->
+            <div class="detail-section">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h3>Listing Status</h3>
+                    {% if listing.admin_approval_status == 'pending' %}
+                    <span class="badge bg-warning status-badge-large">
+                        <i class="fas fa-clock me-1"></i>Pending Review
+                    </span>
+                    {% elif listing.admin_approval_status == 'approved' %}
+                    <span class="badge bg-success status-badge-large">
+                        <i class="fas fa-check-circle me-1"></i>Approved
+                    </span>
+                    {% else %}
+                    <span class="badge bg-danger status-badge-large">
+                        <i class="fas fa-times-circle me-1"></i>Rejected
+                    </span>
+                    {% endif %}
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <strong>Listing Reference:</strong><br>
+                        {{ listing.listing_reference }}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Submitted:</strong><br>
+                        {{ listing.created_at.strftime('%B %d, %Y at %H:%M') }}
+                    </div>
+                    {% if listing.approved_at %}
+                    <div class="col-md-6">
+                        <strong>Approved:</strong><br>
+                        {{ listing.approved_at.strftime('%B %d, %Y at %H:%M') }}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Approved By:</strong><br>
+                        {{ listing.approver.get_full_name() if listing.approver else 'N/A' }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Property Details -->
+            <div class="detail-section">
+                <h4 class="mb-3"><i class="fas fa-home me-2"></i>Property Information</h4>
+                <h5 class="mb-3">{{ listing.title }}</h5>
+                
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <strong>Price:</strong><br>
+                        <span class="text-primary fs-5">K{{ "{:,.2f}".format(listing.asking_price) }}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Size:</strong><br>
+                        {{ listing.size }} hectares
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Property Type:</strong><br>
+                        <span class="badge bg-info">{{ listing.property_type.replace('_', ' ')|title }}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Land Use:</strong><br>
+                        <span class="badge bg-secondary">{{ listing.land_use|capitalize }}</span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <strong>Location:</strong><br>
+                    <i class="fas fa-map-marker-alt me-1"></i>{{ listing.location }}
+                </div>
+
+                <div class="mb-3">
+                    <strong>Registration Status:</strong><br>
+                    {% if listing.is_registered %}
+                    <span class="badge bg-success"><i class="fas fa-certificate me-1"></i>Registered (Has Title Deed)</span>
+                    {% else %}
+                    <span class="badge bg-warning"><i class="fas fa-exclamation-triangle me-1"></i>Unregistered Land</span>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <strong>Description:</strong><br>
+                    <p class="mt-2">{{ listing.description }}</p>
+                </div>
+            </div>
+
+            <!-- Amenities -->
+            {% if listing.amenities %}
+            <div class="detail-section">
+                <h4 class="mb-3"><i class="fas fa-check-circle me-2"></i>Amenities & Features</h4>
+                <div>
+                    {% for amenity in listing.amenities %}
+                    <span class="badge bg-light text-dark me-2 mb-2" style="padding: 0.5rem 1rem;">
+                        <i class="fas fa-check text-success me-1"></i>{{ amenity.replace('_', ' ')|title }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Seller Information -->
+            <div class="detail-section">
+                <h4 class="mb-3"><i class="fas fa-user me-2"></i>Seller Information</h4>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <strong>Seller Name:</strong><br>
+                        {{ listing.seller_name }}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Phone:</strong><br>
+                        <a href="tel:{{ listing.seller_phone }}">{{ listing.seller_phone }}</a>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Email:</strong><br>
+                        <a href="mailto:{{ listing.seller_email }}">{{ listing.seller_email }}</a>
+                    </div>
+                    {% if listing.seller_whatsapp %}
+                    <div class="col-md-6">
+                        <strong>WhatsApp:</strong><br>
+                        {{ listing.seller_whatsapp }}
+                    </div>
+                    {% endif %}
+                    <div class="col-md-6">
+                        <strong>User ID:</strong><br>
+                        {{ listing.seller_id }}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>View Count:</strong><br>
+                        {{ listing.view_count }} views
+                    </div>
+                </div>
+            </div>
+
+            <!-- Location Map -->
+            {% if listing.coordinates or (listing.latitude and listing.longitude) %}
+            <div class="detail-section">
+                <h4 class="mb-3"><i class="fas fa-map me-2"></i>Property Location on Map</h4>
+                {% if listing.latitude and listing.longitude %}
+                <p class="text-muted small mb-2">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Coordinates: {{ listing.latitude }}, {{ listing.longitude }}
+                </p>
+                {% endif %}
+                <div id="propertyMap"></div>
+            </div>
+            {% endif %}
+
+            <!-- Admin Comments History -->
+            {% if listing.admin_comments %}
+            <div class="detail-section">
+                <h4 class="mb-3"><i class="fas fa-comments me-2"></i>Admin Comments & History</h4>
+                
+                {% if listing.admin_comments.approval %}
+                <div class="comment-box">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong class="text-success"><i class="fas fa-check-circle me-1"></i>Approval Note</strong>
+                            <p class="mb-1 mt-2">{{ listing.admin_comments.approval.comment }}</p>
+                        </div>
+                    </div>
+                    <small class="text-muted">
+                        By {{ listing.admin_comments.approval.admin_name }} on 
+                        {{ listing.admin_comments.approval.timestamp }}
+                    </small>
+                </div>
+                {% endif %}
+
+                {% if listing.admin_comments.rejection %}
+                <div class="comment-box border-danger">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong class="text-danger"><i class="fas fa-times-circle me-1"></i>Rejection Reason</strong>
+                            <p class="mb-1 mt-2">{{ listing.admin_comments.rejection.reason }}</p>
+                        </div>
+                    </div>
+                    <small class="text-muted">
+                        By {{ listing.admin_comments.rejection.admin_name }} on 
+                        {{ listing.admin_comments.rejection.timestamp }}
+                    </small>
+                </div>
+                {% endif %}
+
+                {% if listing.admin_comments.comments %}
+                <h5 class="mt-3 mb-2">General Comments:</h5>
+                {% for comment in listing.admin_comments.comments %}
+                <div class="comment-box">
+                    <p class="mb-1">{{ comment.comment }}</p>
+                    <small class="text-muted">
+                        By {{ comment.admin_name }} on {{ comment.timestamp }}
+                    </small>
+                </div>
+                {% endfor %}
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Actions Sidebar -->
+        <div class="col-lg-4">
+            <div class="action-card">
+                <h4 class="mb-3">Admin Actions</h4>
+
+                <!-- Approve Form -->
+                {% if listing.admin_approval_status == 'pending' %}
+                <form method="POST" action="{{ url_for('approve_seller_listing', listing_id=listing.id) }}" class="mb-3">
+                    <div class="mb-3">
+                        <label class="form-label">Approval Comments (Optional)</label>
+                        <textarea name="admin_comments" class="form-control" rows="3" 
+                                  placeholder="Add any notes about this approval..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="fas fa-check-circle me-2"></i>Approve Listing
+                    </button>
+                </form>
+
+                <!-- Reject Form -->
+                <form method="POST" action="{{ url_for('reject_seller_listing', listing_id=listing.id) }}" 
+                      onsubmit="return confirm('Are you sure you want to reject this listing?');">
+                    <div class="mb-3">
+                        <label class="form-label">Rejection Reason <span class="text-danger">*</span></label>
+                        <textarea name="rejection_reason" class="form-control" rows="3" 
+                                  placeholder="Explain why this listing is being rejected..." required></textarea>
+                        <small class="form-text text-muted">
+                            This reason will be stored and may be shared with the seller.
+                        </small>
+                    </div>
+                    <button type="submit" class="btn btn-danger w-100">
+                        <i class="fas fa-times-circle me-2"></i>Reject Listing
+                    </button>
+                </form>
+                {% endif %}
+
+                <!-- Add Comment (Always Available) -->
+                <form method="POST" action="{{ url_for('add_listing_comment', listing_id=listing.id) }}" class="mt-3">
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label">Add Comment</label>
+                        <textarea name="comment" class="form-control" rows="2" 
+                                  placeholder="Add a comment or note..." required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="fas fa-comment me-2"></i>Add Comment
+                    </button>
+                </form>
+
+                <hr class="my-3">
+
+                <!-- Quick Actions -->
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('land_details', listing_id=listing.id) }}" 
+                       class="btn btn-outline-secondary" target="_blank">
+                        <i class="fas fa-external-link-alt me-2"></i>View Public Page
+                    </a>
+                    <a href="{{ url_for('admin_seller_listings') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-2"></i>Back to Listings
+                    </a>
+                </div>
+            </div>
+
+            <!-- Statistics Card -->
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h6 class="card-title fw-bold">Statistics</h6>
+                    <hr>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Views:</span>
+                        <strong>{{ listing.view_count }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Days Listed:</span>
+                        <strong>{{ (now() - listing.created_at).days }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Status:</span>
+                        <strong>{{ listing.status|capitalize }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if listing.coordinates or (listing.latitude and listing.longitude) %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        let mapCenter = [-12.9684, 28.6369];
+        let mapZoom = 12;
+        
+        {% if listing.latitude and listing.longitude %}
+        mapCenter = [{{ listing.latitude }}, {{ listing.longitude }}];
+        mapZoom = 15;
+        {% endif %}
+        
+        const map = L.map('propertyMap').setView(mapCenter, mapZoom);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        {% if listing.coordinates_geojson %}
+        try {
+            const coordinatesData = {{ listing.coordinates_geojson|tojson|safe }};
+            
+            if (coordinatesData && coordinatesData.type) {
+                const geoJsonLayer = L.geoJSON(coordinatesData, {
+                    style: {
+                        color: '#dc3545',
+                        fillColor: '#dc3545',
+                        fillOpacity: 0.3,
+                        weight: 3
+                    }
+                }).addTo(map);
+                
+                map.fitBounds(geoJsonLayer.getBounds());
+                
+                geoJsonLayer.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}<br>Size: {{ listing.size }} ha');
+            }
+        } catch (e) {
+            console.error('Error rendering coordinates:', e);
+            {% if listing.latitude and listing.longitude %}
+            const marker = L.marker([{{ listing.latitude }}, {{ listing.longitude }}]).addTo(map);
+            marker.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}').openPopup();
+            {% endif %}
+        }
+        {% elif listing.latitude and listing.longitude %}
+        const marker = L.marker([{{ listing.latitude }}, {{ listing.longitude }}]).addTo(map);
+        marker.bindPopup('<strong>{{ listing.title }}</strong><br>{{ listing.location }}<br>Size: {{ listing.size }} ha').openPopup();
+        {% endif %}
+        
+        setTimeout(function() {
+            map.invalidateSize();
+        }, 100);
+    });
+</script>
+{% endif %}
+{% endblock %}

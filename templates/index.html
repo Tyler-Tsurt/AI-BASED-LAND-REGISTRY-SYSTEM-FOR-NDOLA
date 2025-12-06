@@ -5,15 +5,12 @@
 {% endblock %}
 {% block content %}
     <!-- Hero Section -->
-    <section class="hero-section">
+    <section class="hero-section hero-with-bg">
         <div class="hero-overlay"></div>
         <div class="container">
             <div class="row align-items-center min-vh-50">
                 <div class="col-lg-6">
-                    <div class="d-flex align-items-center mb-3">
-                        <img src="{{ url_for('static', filename='images/zambia.jpg') }}" alt="Zambia" class="img-fluid me-3" style="max-height: 80px; border-radius: 8px;">
-                        <h1 class="display-4 fw-bold text-white mb-0">AI-Powered Land Registry</h1>
-                    </div>
+                    <h1 class="display-4 fw-bold text-white mb-3">AI-Powered Land Registry</h1>
                     <p class="lead text-white mb-4">Secure, transparent, and efficient land registration for Ndola, Zambia. Powered by artificial intelligence and advanced GIS technology.</p>
                     <div class="d-flex gap-3">
                         <a href="{{ url_for('register_land') }}" class="btn btn-success btn-lg"><i class="fas fa-plus-circle me-2"></i>Register Land</a>

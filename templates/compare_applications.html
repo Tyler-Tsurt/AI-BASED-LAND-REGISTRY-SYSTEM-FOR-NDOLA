@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Compare Applications</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        .compare-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .compare-header {
+            background: linear-gradient(135deg, #0d6efd 0%, #6610f2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+        .app-column {
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1.5rem;
+            background: white;
+        }
+        .app-column.highlight {
+            border-color: #dc3545;
+            box-shadow: 0 0 20px rgba(220, 53, 69, 0.2);
+        }
+        .field-row {
+            display: grid;
+            grid-template-columns: 200px 1fr 1fr;
+            gap: 1rem;
+            padding: 0.75rem;
+            border-bottom: 1px solid #e9ecef;
+            align-items: center;
+        }
+        .field-row:hover {
+            background: #f8f9fa;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .field-value {
+            color: #212529;
+        }
+        .field-value.different {
+            background: #fff3cd;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            border-left: 3px solid #ffc107;
+        }
+        .field-value.match {
+            background: #d1ecf1;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            border-left: 3px solid #0dcaf0;
+        }
+        .similarity-badge {
+            font-size: 1.2rem;
+            padding: 0.5rem 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="compare-container py-4">
+        <!-- Header -->
+        <div class="compare-header text-center">
+            <h1 class="mb-2"><i class="fas fa-columns me-2"></i>Application Comparison</h1>
+            <p class="lead mb-0">Side-by-side comparison of potentially conflicting applications</p>
+        </div>
+
+        <!-- Similarity Overview -->
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h5 class="card-title"><i class="fas fa-chart-pie me-2"></i>Similarity Analysis</h5>
+                <div class="row mt-3">
+                    <div class="col-md-3">
+                        <div class="mb-2"><strong>Identity Match</strong></div>
+                        {% set nrc_match = app1.nrc_number == app2.nrc_number %}
+                        {% set tpin_match = app1.tpin_number and app2.tpin_number and app1.tpin_number == app2.tpin_number %}
+                        <span class="badge similarity-badge bg-{{ 'danger' if (nrc_match or tpin_match) else 'success' }}">
+                            {{ '100%' if (nrc_match or tpin_match) else '0%' }}
+                        </span>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mb-2"><strong>Name Match</strong></div>
+                        {% set name_match = app1.applicant_name.lower() == app2.applicant_name.lower() %}
+                        <span class="badge similarity-badge bg-{{ 'danger' if name_match else 'success' }}">
+                            {{ '100%' if name_match else '0%' }}
+                        </span>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mb-2"><strong>Location Match</strong></div>
+                        {% set location_match = app1.land_location.lower() in app2.land_location.lower() or app2.land_location.lower() in app1.land_location.lower() %}
+                        <span class="badge similarity-badge bg-{{ 'warning' if location_match else 'success' }}">
+                            {{ 'Partial' if location_match else 'None' }}
+                        </span>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mb-2"><strong>Overall Risk</strong></div>
+                        {% set high_risk = (nrc_match or tpin_match or name_match) %}
+                        <span class="badge similarity-badge bg-{{ 'danger' if high_risk else 'success' }}">
+                            {{ 'HIGH' if high_risk else 'LOW' }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Application Comparison -->
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <div class="app-column {{ 'highlight' if app1.status == 'conflict' else '' }}">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0"><i class="fas fa-file-alt me-2"></i>Application 1</h4>
+                        <span class="badge bg-{{ 'warning' if app1.status == 'pending' else 'danger' if app1.status == 'conflict' else 'success' if app1.status == 'approved' else 'secondary' }}">
+                            {{ app1.status|capitalize }}
+                        </span>
+                    </div>
+                    <p class="text-muted mb-0"><strong>Ref:</strong> {{ app1.reference_number }}</p>
+                    <p class="text-muted"><strong>Submitted:</strong> {{ app1.submitted_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="app-column {{ 'highlight' if app2.status == 'conflict' else '' }}">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0"><i class="fas fa-file-alt me-2"></i>Application 2</h4>
+                        <span class="badge bg-{{ 'warning' if app2.status == 'pending' else 'danger' if app2.status == 'conflict' else 'success' if app2.status == 'approved' else 'secondary' }}">
+                            {{ app2.status|capitalize }}
+                        </span>
+                    </div>
+                    <p class="text-muted mb-0"><strong>Ref:</strong> {{ app2.reference_number }}</p>
+                    <p class="text-muted"><strong>Submitted:</strong> {{ app2.submitted_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Comparison -->
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-table me-2"></i>Field-by-Field Comparison</h5>
+            </div>
+            <div class="card-body p-0">
+                <!-- Personal Information -->
+                <div class="p-3 bg-light border-bottom">
+                    <h6 class="mb-0"><i class="fas fa-user me-2"></i>Personal Information</h6>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Applicant Name</div>
+                    <div class="field-value {{ 'match' if app1.applicant_name.lower() == app2.applicant_name.lower() else 'different' }}">
+                        {{ app1.applicant_name }}
+                    </div>
+                    <div class="field-value {{ 'match' if app1.applicant_name.lower() == app2.applicant_name.lower() else 'different' }}">
+                        {{ app2.applicant_name }}
+                    </div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">NRC Number</div>
+                    <div class="field-value {{ 'match' if app1.nrc_number == app2.nrc_number else '' }}">
+                        {{ app1.nrc_number }}
+                    </div>
+                    <div class="field-value {{ 'match' if app1.nrc_number == app2.nrc_number else '' }}">
+                        {{ app2.nrc_number }}
+                    </div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">TPIN Number</div>
+                    <div class="field-value {{ 'match' if app1.tpin_number and app2.tpin_number and app1.tpin_number == app2.tpin_number else '' }}">
+                        {{ app1.tpin_number or 'N/A' }}
+                    </div>
+                    <div class="field-value {{ 'match' if app1.tpin_number and app2.tpin_number and app1.tpin_number == app2.tpin_number else '' }}">
+                        {{ app2.tpin_number or 'N/A' }}
+                    </div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Phone Number</div>
+                    <div class="field-value {{ 'match' if app1.phone_number == app2.phone_number else '' }}">
+                        {{ app1.phone_number }}
+                    </div>
+                    <div class="field-value {{ 'match' if app1.phone_number == app2.phone_number else '' }}">
+                        {{ app2.phone_number }}
+                    </div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Email</div>
+                    <div class="field-value {{ 'match' if app1.email and app2.email and app1.email.lower() == app2.email.lower() else '' }}">
+                        {{ app1.email or 'N/A' }}
+                    </div>
+                    <div class="field-value {{ 'match' if app1.email and app2.email and app1.email.lower() == app2.email.lower() else '' }}">
+                        {{ app2.email or 'N/A' }}
+                    </div>
+                </div>
+                
+                <!-- Land Information -->
+                <div class="p-3 bg-light border-bottom border-top">
+                    <h6 class="mb-0"><i class="fas fa-map-marked-alt me-2"></i>Land Information</h6>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Land Location</div>
+                    <div class="field-value">{{ app1.land_location }}</div>
+                    <div class="field-value">{{ app2.land_location }}</div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Land Size</div>
+                    <div class="field-value">{{ '%.2f'|format(app1.land_size) }} hectares</div>
+                    <div class="field-value">{{ '%.2f'|format(app2.land_size) }} hectares</div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Land Use</div>
+                    <div class="field-value">{{ app1.land_use|capitalize }}</div>
+                    <div class="field-value">{{ app2.land_use|capitalize }}</div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Description</div>
+                    <div class="field-value">{{ app1.land_description or 'N/A' }}</div>
+                    <div class="field-value">{{ app2.land_description or 'N/A' }}</div>
+                </div>
+                
+                <!-- Documents -->
+                <div class="p-3 bg-light border-bottom border-top">
+                    <h6 class="mb-0"><i class="fas fa-file-upload me-2"></i>Uploaded Documents</h6>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Document Count</div>
+                    <div class="field-value">{{ docs1|length }} document(s)</div>
+                    <div class="field-value">{{ docs2|length }} document(s)</div>
+                </div>
+                
+                <div class="field-row">
+                    <div class="field-label">Document Types</div>
+                    <div class="field-value">
+                        <small>
+                        {% for doc in docs1 %}
+                            • {{ doc.document_type }}<br>
+                        {% endfor %}
+                        </small>
+                    </div>
+                    <div class="field-value">
+                        <small>
+                        {% for doc in docs2 %}
+                            • {{ doc.document_type }}<br>
+                        {% endfor %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="mt-4 text-center">
+            <a href="{{ url_for('review_application', app_id=app1.id) }}" class="btn btn-primary me-2" target="_blank">
+                <i class="fas fa-eye me-2"></i>View Application 1
+            </a>
+            <a href="{{ url_for('review_application', app_id=app2.id) }}" class="btn btn-primary me-2" target="_blank">
+                <i class="fas fa-eye me-2"></i>View Application 2
+            </a>
+            <button onclick="window.close()" class="btn btn-secondary">
+                <i class="fas fa-times me-2"></i>Close Comparison
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Apply stored theme
+        (function(){
+            try{
+                var s = localStorage.getItem('ndola_theme');
+                if (s === 'dark' || (!s && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)){
+                    document.documentElement.setAttribute('data-theme','dark');
+                }
+            }catch(e){}
+        })();
+    </script>
+</body>
+</html>

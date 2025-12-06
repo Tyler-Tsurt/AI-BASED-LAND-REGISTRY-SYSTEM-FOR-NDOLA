@@ -1,0 +1,316 @@
+{% extends 'base.html' %}
+
+{% block title %}Manual Land Entry — Admin{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+<style>
+    .form-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    [data-theme="dark"] .form-card {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] h2, [data-theme="dark"] h3, [data-theme="dark"] label {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+    [data-theme="dark"] .form-control,
+    [data-theme="dark"] .form-select {
+        background: #1a202c;
+        color: #e2e8f0;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .form-control:focus,
+    [data-theme="dark"] .form-select:focus {
+        background: #1a202c;
+        color: #e2e8f0;
+        border-color: #4299e1;
+    }
+    #mapContainer {
+        height: 450px;
+        border-radius: 8px;
+        border: 2px solid var(--bs-border-color);
+        margin-bottom: 1rem;
+    }
+    .map-instructions {
+        background: #e7f3ff;
+        border-left: 4px solid #0d6efd;
+        padding: 1rem;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+    }
+    [data-theme="dark"] .map-instructions {
+        background: #1a3a52;
+        border-color: #4299e1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="form-card">
+                <div class="text-center mb-4">
+                    <i class="fas fa-file-alt text-primary" style="font-size: 3rem;"></i>
+                    <h2 class="mt-3">Manual Land Record Entry</h2>
+                    <p class="text-muted">Enter physical land application records into the system</p>
+                </div>
+
+                <form method="POST" id="manualEntryForm">
+                    <!-- Applicant Information -->
+                    <h4 class="mb-3"><i class="fas fa-user me-2"></i>Applicant Information</h4>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="applicant_name" class="form-label">Applicant Name *</label>
+                            <input type="text" class="form-control" id="applicant_name" 
+                                   name="applicant_name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="nrc_number" class="form-label">NRC/Passport Number *</label>
+                            <input type="text" class="form-control" id="nrc_number" 
+                                   name="nrc_number" required>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="phone_number" class="form-label">Phone Number</label>
+                            <input type="tel" class="form-control" id="phone_number" 
+                                   name="phone_number" placeholder="+260...">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="email" class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="tpin_number" class="form-label">TPIN Number</label>
+                        <input type="text" class="form-control" id="tpin_number" name="tpin_number">
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Land Information -->
+                    <h4 class="mb-3"><i class="fas fa-map me-2"></i>Land Information</h4>
+
+                    <div class="mb-3">
+                        <label for="land_location" class="form-label">Land Location *</label>
+                        <textarea class="form-control" id="land_location" name="land_location" 
+                                  rows="2" required></textarea>
+                        <small class="text-muted">e.g., Plot 123, Chifubu Township, Ndola</small>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="land_size" class="form-label">Land Size (hectares) *</label>
+                            <input type="number" class="form-control" id="land_size" 
+                                   name="land_size" step="0.01" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="land_use" class="form-label">Land Use *</label>
+                            <select class="form-select" id="land_use" name="land_use" required>
+                                <option value="">Select land use...</option>
+                                <option value="residential">Residential</option>
+                                <option value="commercial">Commercial</option>
+                                <option value="agricultural">Agricultural</option>
+                                <option value="industrial">Industrial</option>
+                                <option value="mixed">Mixed Use</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="land_description" class="form-label">Land Description</label>
+                        <textarea class="form-control" id="land_description" 
+                                  name="land_description" rows="3"></textarea>
+                        <small class="text-muted">Additional details about the land parcel</small>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Map Section -->
+                    <h4 class="mb-3"><i class="fas fa-map-marked-alt me-2"></i>Land Location Map (Optional)</h4>
+                    <div class="map-instructions">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Instructions:</strong> Use the drawing tools on the map to mark the land parcel location.
+                        Click the polygon or rectangle tool to draw the boundaries of the land.
+                    </div>
+                    <div id="mapContainer"></div>
+                    <input type="hidden" name="land_geometry" id="landGeometry">
+                    <small class="text-muted d-block mb-3">
+                        <i class="fas fa-lightbulb me-1"></i>
+                        Map marking is optional for manual entries. If you have the exact location, draw it on the map. 
+                        The area will be automatically calculated.
+                    </small>
+
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Note:</strong> Manual entries are automatically approved and marked with "LR-M-" prefix. 
+                        AI conflict detection is not run on manual entries by default.
+                    </div>
+
+                    <div class="text-center mt-4">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-save me-2"></i>Save Land Record
+                        </button>
+                        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary btn-lg ms-2">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script>
+// Initialize map centered on Ndola
+const map = L.map('mapContainer').setView([-12.9684, 28.6369], 12);
+
+// Add OpenStreetMap tiles
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19
+}).addTo(map);
+
+// Initialize the draw control
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+const drawControl = new L.Control.Draw({
+    position: 'topright',
+    draw: {
+        polygon: {
+            allowIntersection: false,
+            drawError: {
+                color: '#e74c3c',
+                message: 'Land boundaries cannot intersect!'
+            },
+            shapeOptions: {
+                color: '#3498db',
+                fillOpacity: 0.3
+            }
+        },
+        polyline: false,
+        rectangle: {
+            shapeOptions: {
+                color: '#3498db',
+                fillOpacity: 0.3
+            }
+        },
+        circle: false,
+        marker: false,
+        circlemarker: false
+    },
+    edit: {
+        featureGroup: drawnItems,
+        remove: true
+    }
+});
+map.addControl(drawControl);
+
+let currentLayer = null;
+
+// GeometryUtil for area calculation
+L.GeometryUtil = L.extend(L.GeometryUtil || {}, {
+    geodesicArea: function (latLngs) {
+        let pointsCount = latLngs.length;
+        let area = 0.0;
+        let d2r = Math.PI / 180;
+        let p1, p2;
+
+        if (pointsCount > 2) {
+            for (let i = 0; i < pointsCount; i++) {
+                p1 = latLngs[i];
+                p2 = latLngs[(i + 1) % pointsCount];
+                area += ((p2.lng - p1.lng) * d2r) *
+                        (2 + Math.sin(p1.lat * d2r) + Math.sin(p2.lat * d2r));
+            }
+            area = area * 6378137.0 * 6378137.0 / 2.0;
+        }
+
+        return Math.abs(area);
+    }
+});
+
+// Handle drawing complete
+map.on(L.Draw.Event.CREATED, function (e) {
+    const layer = e.layer;
+    
+    // Remove previous drawing if exists
+    if (currentLayer) {
+        drawnItems.removeLayer(currentLayer);
+    }
+    
+    drawnItems.addLayer(layer);
+    currentLayer = layer;
+    
+    // Get GeoJSON and store it
+    const geoJSON = layer.toGeoJSON();
+    document.getElementById('landGeometry').value = JSON.stringify(geoJSON.geometry);
+    
+    // Calculate and display area
+    const area = L.GeometryUtil.geodesicArea(layer.getLatLngs()[0]);
+    const hectares = (area / 10000).toFixed(2);
+    
+    // Update land size field if empty or zero
+    const sizeInput = document.getElementById('land_size');
+    if (!sizeInput.value || parseFloat(sizeInput.value) === 0) {
+        sizeInput.value = hectares;
+    }
+    
+    layer.bindPopup(`<strong>Calculated Area:</strong> ${hectares} hectares`).openPopup();
+});
+
+// Handle editing
+map.on(L.Draw.Event.EDITED, function (e) {
+    const layers = e.layers;
+    layers.eachLayer(function(layer) {
+        const geoJSON = layer.toGeoJSON();
+        document.getElementById('landGeometry').value = JSON.stringify(geoJSON.geometry);
+        
+        // Recalculate area
+        const area = L.GeometryUtil.geodesicArea(layer.getLatLngs()[0]);
+        const hectares = (area / 10000).toFixed(2);
+        document.getElementById('land_size').value = hectares;
+        layer.bindPopup(`<strong>Calculated Area:</strong> ${hectares} hectares`).openPopup();
+    });
+});
+
+// Handle deletion
+map.on(L.Draw.Event.DELETED, function (e) {
+    document.getElementById('landGeometry').value = '';
+    currentLayer = null;
+});
+
+// Form submission handler
+document.getElementById('manualEntryForm').addEventListener('submit', function(e) {
+    const submitBtn = this.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+    submitBtn.disabled = true;
+    
+    // Re-enable after 5 seconds if still on page
+    setTimeout(() => {
+        if (document.body.contains(submitBtn)) {
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    }, 5000);
+});
+</script>
+{% endblock %}

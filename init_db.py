@@ -3,13 +3,10 @@ load_dotenv()
 import argparse
 import sys
 from flask import Flask
-from models import db, User, SystemSettings, LandApplication, LandParcel, LandConflict
+from models import db, User, SystemSettings
 from werkzeug.security import generate_password_hash
-from geoalchemy2.shape import from_shape
-from shapely.geometry import Polygon
 from datetime import datetime
 import os
-import secrets
 
 def create_app():
     """Create Flask application for database initialization"""
@@ -37,10 +34,9 @@ def init_database():
             print("Creating database tables...")
             db.create_all()
             
-            # Create default admin user
-            print("Creating default admin user...")
+            print("Creating default users...")
             
-            # Create a user object and set the password using the set_password method
+            # Create super admin user
             admin = User(
                 username='admin',
                 email='admin@ndolalands.gov.zm',
@@ -84,10 +80,22 @@ def init_database():
             )
             citizen.set_password('citizen123')
             
+            # Create seller user
+            seller = User(
+                username='seller1',
+                email='seller1@example.com',
+                first_name='John',
+                last_name='Seller',
+                role='seller',
+                phone_number='+260971234568'
+            )
+            seller.set_password('seller123')
+            
             db.session.add(admin)
             db.session.add(ministry_admin)
             db.session.add(council_admin)
             db.session.add(citizen)
+            db.session.add(seller)
             
             # Create default system settings
             print("Creating system settings...")
@@ -145,234 +153,29 @@ def init_database():
             
             # Commit all changes
             db.session.commit()
-            print("Database initialized successfully!")
+            print("✅ Database initialized successfully!")
             
             # Display created users
             print("\n=== Created Users ===")
             users = User.query.all()
             for user in users:
-                print(f"Username: {user.username}, Email: {user.email}, Role: {user.role}")
+                print(f"  • {user.username:20} | {user.email:30} | Role: {user.role}")
             
             print(f"\n=== System Settings Created: {len(default_settings)} ===")
-            print("Database initialization completed!")
             
         except Exception as e:
-            print(f"Error during database initialization: {str(e)}")
-            db.session.rollback()
-            raise
-
-def create_sample_data():
-    """Create sample applications and data for testing"""
-    app = create_app()
-    
-    with app.app_context():
-        try:
-            print("Creating sample applications...")
-            
-            # Get admin user for reviewed_by field
-            admin = User.query.filter_by(username='admin').first()
-            
-            # Sample applications
-            sample_applications = [
-                {
-                    'reference_number': 'LR-2025-0001',
-                    'applicant_name': 'John Mwila',
-                    'nrc_number': '123456/78/9',
-                    'tpin_number': '1001234567',
-                    'phone_number': '+260971234567',
-                    'email': 'john.mwila@example.com',
-                    'land_location': 'Chifubu, Plot 4521, House Number 23, Ndola',
-                    'land_size': 2.5,
-                    'land_use': 'residential',
-                    'land_description': 'Residential plot for family home construction',
-                    'status': 'pending',
-                    'priority': 'high',
-                    'ai_conflict_score': 0.85,
-                    'ai_duplicate_score': 0.12,
-                    'processing_fee': 500.0,
-                    'payment_status': 'paid'
-                },
-                {
-                    'reference_number': 'LR-2025-0002',
-                    'applicant_name': 'Mary Phiri',
-                    'nrc_number': '987654/32/1',
-                    'tpin_number': '1009876543',
-                    'phone_number': '+260977654321',
-                    'email': 'mary.phiri@example.com',
-                    'land_location': 'Kansenshi, Plot 1247, Near Kansenshi Market',
-                    'land_size': 1.8,
-                    'land_use': 'commercial',
-                    'land_description': 'Commercial plot for retail business',
-                    'status': 'under_review',
-                    'priority': 'medium',
-                    'ai_conflict_score': 0.15,
-                    'ai_duplicate_score': 0.08,
-                    'processing_fee': 750.0,
-                    'payment_status': 'paid',
-                    'reviewed_by': admin.id if admin else None
-                },
-                {
-
-                    'land_size': 3.2,
-                    'land_use': 'agricultural',
-                    'land_description': 'Agricultural land for crop farming',
-                    'status': 'approved',
-                    'priority': 'low',
-                    'ai_conflict_score': 0.05,
-                    'ai_duplicate_score': 0.03,
-                    'processing_fee': 500.0,
-                    'payment_status': 'paid',
-                    'reviewed_by': admin.id if admin else None
-                },
-                {
-                    'reference_number': 'LR-2025-0004',
-                    'applicant_name': 'Grace Tembo',
-                    'nrc_number': '321987/65/4',
-                    'tpin_number': '1003219876',
-                    'phone_number': '+260976543210',
-                    'email': 'grace.tembo@example.com',
-                    'land_location': 'Northrise, Plot 334, Northrise Extension',
-                    'land_size': 1.5,
-                    'land_use': 'residential',
-                    'land_description': 'Residential plot in upmarket area',
-                    'status': 'pending',
-                    'priority': 'high',
-                    'ai_conflict_score': 0.92,
-                    'ai_duplicate_score': 0.78,
-                    'processing_fee': 500.0,
-                    'payment_status': 'pending'
-                },
-                {
-                    'reference_number': 'LR-2025-0005',
-                    'applicant_name': 'Peter Mukuka',
-                    'nrc_number': '159753/48/6',
-                    'tpin_number': '1001597534',
-                    'phone_number': '+260955789123',
-                    'email': 'peter.mukuka@example.com',
-                    'land_location': 'Chipulukusu, Plot 567, Near Chipulukusu Market',
-                    'land_size': 2.0,
-                    'land_use': 'mixed',
-                    'land_description': 'Mixed use development - residential and small business',
-                    'status': 'rejected',
-                    'priority': 'medium',
-                    'ai_conflict_score': 0.95,
-                    'ai_duplicate_score': 0.89,
-                    'processing_fee': 500.0,
-                    'payment_status': 'paid',
-                    'reviewed_by': admin.id if admin else None,
-                    'rejection_reason': 'Overlaps with existing parcel ND-2024-00123'
-                }
-            ]
-            
-            for app_data in sample_applications:
-                existing = LandApplication.query.filter_by(reference_number=app_data['reference_number']).first()
-                if not existing:
-                    application = LandApplication(**app_data)
-                    db.session.add(application)
-            
-            # Sample land parcels (already registered)
-            print("Creating sample land parcels...")
-            sample_parcels = [
-                {
-                    'parcel_number': 'ND-2024-00123',
-                    'certificate_number': 'CERT-2024-00123',
-                    'owner_name': 'James Mulenga',
-                    'owner_nrc': '112233/44/5',
-                    'owner_phone': '+260971112233',
-                    'owner_email': 'james.mulenga@example.com',
-                    'location': 'Chipulukusu, Plot 566, Adjacent to Market Area',
-                    'size': 1.8,
-                    'land_use': 'commercial',
-                    'ward': 'Chipulukusu Ward',
-                    'constituency': 'Ndola Central',
-                    'status': 'active',
-                    'title_deed_issued': True,
-                    'survey_completed': True,
-                    'valuation': 250000.0,
-                    'annual_tax': 2500.0
-                },
-                {
-                    'parcel_number': 'ND-2024-00124',
-                    'certificate_number': 'CERT-2024-00124',
-                    'owner_name': 'Sarah Mutale',
-                    'owner_nrc': '556677/88/9',
-                    'owner_phone': '+260975567788',
-                    'owner_email': 'sarah.mutale@example.com',
-                    'location': 'Masala, Plot 790, Masala Extension',
-                    'size': 2.1,
-                    'land_use': 'residential',
-                    'ward': 'Masala Ward',
-                    'constituency': 'Ndola Central',
-                    'status': 'active',
-                    'title_deed_issued': True,
-                    'survey_completed': True,
-                    'valuation': 180000.0,
-                    'annual_tax': 1800.0
-                }
-            ]
-            
-            for parcel_data in sample_parcels:
-                existing = LandParcel.query.filter_by(parcel_number=parcel_data['parcel_number']).first()
-                if not existing:
-                    parcel = LandParcel(**parcel_data)
-                    db.session.add(parcel)
-            
-            # Sample conflicts
-            print("Creating sample conflicts...")
-            
-            # Get applications for conflicts
-            conflict_app = LandApplication.query.filter_by(reference_number='LR-2025-0004').first()
-            conflict_parcel = LandParcel.query.filter_by(parcel_number='ND-2024-00123').first()
-            
-            if conflict_app and conflict_parcel:
-                sample_conflicts = [
-                    {
-                        # Removed 'conflict_id' as it does not exist in the LandConflict model
-                        'conflict_type': 'overlap',
-                        'title': 'Land Boundary Overlap - Northrise Area',
-                        'description': 'Application LR-2025-0004 overlaps with existing parcel ND-2024-00123 by approximately 0.3 hectares',
-                        'severity': 'high',
-                        'status': 'unresolved',
-                        'application_id': conflict_app.id,
-                        'conflicting_parcel_id': conflict_parcel.id,
-                        'overlap_percentage': 20.0,
-                        'detected_by_ai': True,
-                        'confidence_score': 0.92
-                    }
-                ]
-                
-                for conflict_data in sample_conflicts:
-                    # FIX: The check for an existing conflict with a unique ID is not possible
-                    # given the current model structure. Instead, we can simply add the new conflict.
-                    conflict = LandConflict(**conflict_data)
-                    db.session.add(conflict)
-            
-            db.session.commit()
-            print("Sample data created successfully!")
-            
-            # Display summary
-            applications_count = LandApplication.query.count()
-            parcels_count = LandParcel.query.count()
-            conflicts_count = LandConflict.query.count()
-            
-            print(f"\n=== Sample Data Summary ===")
-            print(f"Applications created: {applications_count}")
-            print(f"Land parcels created: {parcels_count}")
-            print(f"Conflicts created: {conflicts_count}")
-            
-        except Exception as e:
-            print(f"Error creating sample data: {str(e)}")
+            print(f"❌ Error during database initialization: {str(e)}")
             db.session.rollback()
             raise
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Initialize the database and optionally create sample data')
-    parser.add_argument('--yes', '-y', action='store_true', help='Run non-interactively and proceed with initialization')
-    parser.add_argument('--with-sample', '-s', action='store_true', help='Also create sample data after initialization')
+    parser = argparse.ArgumentParser(description='Initialize the database with tables and default users')
+    parser.add_argument('--yes', '-y', action='store_true', help='Run non-interactively')
     args = parser.parse_args()
 
     print("=== Ndola Land Registry System - Database Initialization ===")
-    print("This will initialize the database with tables and default data.")
+    print("This will DROP ALL TABLES and recreate them with default data.")
+    print("⚠️  WARNING: All existing data will be lost!\n")
 
     proceed = False
     if args.yes:
@@ -382,25 +185,21 @@ if __name__ == '__main__':
         proceed = choice in ['y', 'yes']
 
     if not proceed:
-        print("Database initialization cancelled.")
+        print("❌ Database initialization cancelled.")
         sys.exit(0)
 
     # Run init
     init_database()
 
-    # Create sample data if requested
-    if args.with_sample or args.yes:
-        # If --with-sample was specified explicitly, or if running non-interactively
-        try:
-            create_sample_data()
-        except Exception:
-            print('Warning: creating sample data failed. Check logs for details.')
-
-    print("\n=== Database setup completed! ===")
-    print("You can now run the Flask application with: python app.py")
-    print("\nDefault login credentials:")
-    print("- Super Admin: admin / admin123")
-    print("- Ministry Admin: ministry_admin / ministry123")
-    print("- Council Admin: council_admin / council123")
-    print("- Test Citizen: citizen_test / citizen123")
-    print("\n*** REMEMBER TO CHANGE DEFAULT PASSWORDS IN PRODUCTION! ***")
+    print("\n=== ✅ Database setup completed! ===")
+    print("\n📝 Next steps:")
+    print("   1. Run: python generate_ndola_data.py --yes")
+    print("   2. Run: python generate_available_lands.py --yes")
+    print("   3. Start app: flask run")
+    print("\n🔐 Default login credentials:")
+    print("   • Super Admin:    admin / admin123")
+    print("   • Ministry Admin: ministry_admin / ministry123")
+    print("   • Council Admin:  council_admin / council123")
+    print("   • Test Citizen:   citizen_test / citizen123")
+    print("   • Seller:         seller1 / seller123")
+    print("\n⚠️  REMEMBER TO CHANGE DEFAULT PASSWORDS IN PRODUCTION!")

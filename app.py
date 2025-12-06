@@ -1,6 +1,3 @@
-
-
-
 import io
 
 import secrets
@@ -26,6 +23,7 @@ from reportlab.lib.colors import black, blue, red, green
 from flask import send_file
 
 from datetime import datetime
+from functools import wraps
 
 from dotenv import load_dotenv
 from flask import (
@@ -38,8 +36,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from shapely.geometry import shape
 from geoalchemy2.shape import from_shape, to_shape
 from sqlalchemy import func, or_
-from models import db, User, LandApplication, Document, LandParcel, LandConflict, SystemSettings, AuditLog, NotificationLog
-from ai_conflict import detect_conflicts, resolve_conflict
+from models import db, User, LandApplication, Document, LandParcel, LandConflict, SystemSettings, AuditLog, NotificationLog, AvailableLand
 from ai_conflict_enhanced import detect_conflicts_from_documents
 from document_processing import extract_document_text
 from validation_utils import (
@@ -276,29 +273,38 @@ def api_verify_payment():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Standard login - FIXED to show only ONE welcome message"""
-    if current_user.is_authenticated:
-        if current_user.role in ['admin', 'super_admin']:
-            return redirect(url_for('admin_dashboard'))
-        else:
-            return redirect(url_for('register_land'))
-
+    """User login with role-based redirection."""
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
+        
         user = User.query.filter_by(username=username).first()
         
-        if user and check_password_hash(user.password_hash, password):
-            login_user(user)
-            # SINGLE WELCOME MESSAGE - removed duplicate flash
-            flash(f'Welcome back, {user.first_name or user.username}!', 'success')
+        if user and user.check_password(password):
+            if not user.is_active:
+                flash('Account deactivated. Contact support.', 'danger')
+                return redirect(url_for('login'))
             
-            if user.role in ['admin', 'super_admin']:
-                return redirect(url_for('admin_dashboard'))
-            return redirect(url_for('register_land'))
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            
+            login_user(user)
+            
+            log_audit('user_login', 'users', user.id, None, {
+                'username': username,
+                'role': user.role
+            })
+            
+            # CRITICAL: Role-based redirect
+            if user.role == 'seller':
+                return redirect(url_for('seller_dashboard'))
+            elif user.role in ['admin', 'super_admin']:
+                return redirect(url_for('admin_seller_listings'))
+            else:  # citizen
+                return redirect(url_for('index'))
         else:
-            flash('Invalid username or password', 'danger')
-
+            flash('Invalid credentials.', 'danger')
+    
     return render_template('login.html')
 
 
@@ -306,14 +312,31 @@ def login():
 @login_required
 
 
-
-
-
 def logout():
     """Logs out the current user."""
     logout_user()
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
+
+
+
+def citizen_required(f):
+    """Decorator to require citizen role for land registration."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash('Please log in.', 'warning')
+            return redirect(url_for('login'))
+        # Only citizens can register land
+        if current_user.role != 'citizen':
+            flash('Only citizens can apply for land registration.', 'danger')
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+
+
 
 
 @app.route("/admin_dashboard")
@@ -1047,84 +1070,93 @@ def approve_payment(app_id):
     return redirect(url_for('review_application', app_id=app_id))
 
 
+
+
+
+
+
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    """Handles user registration."""
+    """User registration with role selection."""
     if request.method == 'POST':
-        # Get form data
-        first_name = request.form.get('first_name')
-        last_name = request.form.get('last_name')
-        email = request.form.get('email')
-        phone_number = request.form.get('phone_number')
-        username = request.form.get('username')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
-        
-        # Server-side validation
-        if not all([first_name, last_name, email, phone_number, username, password, confirm_password]):
-            flash('All required fields must be filled.', 'danger')
-            return render_template('register.html')
-            
-        if password != confirm_password:
-            flash('Passwords do not match.', 'danger')
-            return render_template('register.html')
-            
-        if len(password) < 8 or not re.search(r"[a-z]", password) or not re.search(r"[A-Z]", password) or not re.search(r"\d", password):
-            flash('Password must contain at least 8 characters with an uppercase letter, lowercase letter, and a number.', 'danger')
-            return render_template('register.html')
-            
-        user_exists = User.query.filter((User.username == username) | (User.email == email)).first()
-        if user_exists:
-            flash('An account with that username or email already exists.', 'danger')
-            return render_template('register.html')
-            
-        # Create and save new user
-        hashed_password = generate_password_hash(password)
-        new_user = User(
-            first_name=first_name,
-            last_name=last_name,
-            email=email,
-            phone_number=phone_number,
-            username=username,
-            password_hash=hashed_password,
-            role='citizen',
-        )
-        
         try:
+            # Get form data
+            username = request.form.get('username')
+            email = request.form.get('email')
+            password = request.form.get('password')
+            first_name = request.form.get('first_name')
+            last_name = request.form.get('last_name')
+            phone_number = request.form.get('phone_number')
+            account_type = request.form.get('account_type', 'citizen')
+            
+            # Validate account type
+            if account_type not in ['citizen', 'seller']:
+                flash('Invalid account type.', 'danger')
+                return redirect(url_for('register'))
+            
+            # Check existing username
+            if User.query.filter_by(username=username).first():
+                flash('Username already exists.', 'danger')
+                return redirect(url_for('register'))
+            
+            # Check existing email
+            if User.query.filter_by(email=email).first():
+                flash('Email already registered.', 'danger')
+                return redirect(url_for('register'))
+            
+            # Create user with selected role
+            new_user = User(
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                phone_number=phone_number,
+                role=account_type,  # CRITICAL: Set role from form
+                is_active=True
+            )
+            new_user.set_password(password)
+            
             db.session.add(new_user)
             db.session.commit()
             
-            log_audit('create_user_account', 'users', new_user.id, None, {'username': username, 'role': 'citizen'})
+            # Log registration
+            log_audit('user_registration', 'users', new_user.id, None, {
+                'username': username,
+                'role': account_type
+            })
             
-            flash('Account created successfully! You can now log in.', 'success')
-            return redirect(url_for('login'))
+            # Auto-login
+            login_user(new_user)
+            
+            # CRITICAL: Role-based redirect
+            if account_type == 'seller':
+                flash(f'Welcome {first_name}! Seller account created.', 'success')
+                return redirect(url_for('seller_dashboard'))
+            else:  # citizen
+                flash(f'Welcome {first_name}! Account created.', 'success')
+                return redirect(url_for('index'))
+        
         except Exception as e:
             db.session.rollback()
-            flash(f'An error occurred: {str(e)}', 'danger')
-            
+            flash(f'Registration error: {str(e)}', 'danger')
+    
     return render_template('register.html')
 
 
 
+
+
+
+
+
 # this route has been changed in case it gets messed up replace it 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @app.route('/register_land', methods=['GET', 'POST'])
 @login_required
+
 def register_land():
-    """Handle land registration for citizens - FIXED VERSION"""
+    """Handle land registration for citizens - FIXED VERSION with form data preservation"""
     if current_user.role != "citizen":
         flash("Only citizens can register land", "danger")
         return redirect(url_for("index"))
@@ -1138,7 +1170,7 @@ def register_land():
             registration_type = request.form.get('registration_type')
             if not registration_type:
                 flash('Please select a registration type', 'danger')
-                return render_template('register_land.html')
+                return render_template('register_land.html', form_data=request.form)
 
             try:
                 payment_amount = float(request.form.get('payment_amount', 0))
@@ -1152,7 +1184,7 @@ def register_land():
                     declared_value = float(declared_value_raw.replace(',',''))
             except Exception:
                 flash('Declared value must be a valid number', 'danger')
-                return render_template('register_land.html')
+                return render_template('register_land.html', form_data=request.form)
 
             # Document requirements per type
             doc_requirements = {
@@ -1172,7 +1204,7 @@ def register_land():
             needs_declared = registration_type in ('transfer','mortgage','change_ownership')
             if needs_declared and (not declared_value or declared_value <= 0):
                 flash('Declared property value is required for this registration type', 'danger')
-                return render_template('register_land.html')
+                return render_template('register_land.html', form_data=request.form)
 
             # Validate NRC
             nrc_number = (request.form.get('nrc_number') or '').strip()
@@ -1183,7 +1215,7 @@ def register_land():
                 passport_valid, passport_error = validate_passport(nrc_number)
                 if not passport_valid:
                     flash(f'Invalid ID: {nrc_error}', 'danger')
-                    return render_template('register_land.html')
+                    return render_template('register_land.html', form_data=request.form)
 
             # Validate TPIN if required
             tpin_val = (request.form.get('tpin_number') or '').strip()
@@ -1192,7 +1224,7 @@ def register_land():
                 tpin_valid, tpin_error = validate_tpin(tpin_val)
                 if not tpin_valid:
                     flash(f'Invalid TPIN: {tpin_error}', 'danger')
-                    return render_template('register_land.html')
+                    return render_template('register_land.html', form_data=request.form)
             
             # Validate phone
             phone_number = request.form.get('phone_number')
@@ -1200,7 +1232,7 @@ def register_land():
                 phone_valid, phone_error = validate_phone(phone_number)
                 if not phone_valid:
                     flash(f'Invalid phone: {phone_error}', 'danger')
-                    return render_template('register_land.html')
+                    return render_template('register_land.html', form_data=request.form)
             
             # Validate email
             email = request.form.get('email')
@@ -1208,7 +1240,7 @@ def register_land():
                 email_valid, email_error = validate_email(email)
                 if not email_valid:
                     flash(f'Invalid email: {email_error}', 'danger')
-                    return render_template('register_land.html')
+                    return render_template('register_land.html', form_data=request.form)
             
             # Check for identity duplicates BEFORE creating application
             identity_dups = check_identity_duplicate(nrc_number, tpin_val)
@@ -1230,14 +1262,14 @@ def register_land():
                     missing.append(key.replace('_', ' ').title())
             
             if missing:
-                flash(f'Missing required: {", ".join(missing[:3])}{"..." if len(missing) > 3 else ""}', 'danger')
-                return render_template('register_land.html')
+                flash(f'Missing required documents: {", ".join(missing[:3])}{"..." if len(missing) > 3 else ""}', 'danger')
+                return render_template('register_land.html', form_data=request.form)
 
             # Get and validate geometry
             geometry_json = request.form.get('land_geometry')
             if not geometry_json:
                 flash('Please draw your land parcel on the map', 'danger')
-                return render_template('register_land.html')
+                return render_template('register_land.html', form_data=request.form)
 
             # Parse geometry
             try:
@@ -1247,7 +1279,7 @@ def register_land():
             except Exception as e:
                 current_app.logger.exception('Failed to parse geometry')
                 flash('Invalid map geometry. Please redraw your parcel', 'danger')
-                return render_template('register_land.html')
+                return render_template('register_land.html', form_data=request.form)
 
             # Create application
             application = LandApplication(
@@ -1271,7 +1303,7 @@ def register_land():
                 payment_status="pending",
                 user_id=current_user.id,
                 registration_type=registration_type,
-                coordinates=geom_wkb  # Add geometry here
+                coordinates=geom_wkb
             )
             db.session.add(application)
             db.session.flush()
@@ -1289,7 +1321,7 @@ def register_land():
                 land_description=application.land_description,
                 status="registered",
                 application_id=application.id,
-                coordinates=geom_wkb  # Add geometry here too
+                coordinates=geom_wkb
             )
             db.session.add(parcel)
 
@@ -1332,7 +1364,7 @@ def register_land():
                     except ValueError as ve:
                         db.session.rollback()
                         flash(str(ve), 'danger')
-                        return render_template('register_land.html')
+                        return render_template('register_land.html', form_data=request.form)
                     
                     filepath = os.path.join(
                         current_app.config['UPLOAD_FOLDER'],
@@ -1392,11 +1424,6 @@ def register_land():
                 except Exception:
                     application.annual_rent = None
 
-
-
-
-
-
             # Commit all changes
             db.session.commit()
 
@@ -1405,32 +1432,23 @@ def register_land():
                 def _bg_detect(aid):
                     with app.app_context():
                         try:
-                            # Run all detection methods
                             from ai_conflict import detect_conflicts
                             from ai_conflict_enhanced import detect_conflicts_from_documents
                             from duplicate_detector import detect_all_duplicates
                             
                             print(f"[BG DETECTION] Starting for app {aid}")
-                            
-                            # 1. Spatial conflicts
                             spatial_conflicts = detect_conflicts(aid)
                             print(f"[BG DETECTION] Spatial: {len(spatial_conflicts)} conflicts")
-                            
-                            # 2. Document similarity
                             doc_conflicts = detect_conflicts_from_documents(aid)
                             print(f"[BG DETECTION] Documents: {len(doc_conflicts)} conflicts")
-                            
-                            # 3. Duplicate detection
                             dup_conflicts = detect_all_duplicates(aid)
                             print(f"[BG DETECTION] Duplicates: {len(dup_conflicts)} conflicts")
-                            
                             print(f"[BG DETECTION] Complete for app {aid}")
                         except Exception as e:
                             print(f"[BG DETECTION] ERROR: {e}")
                             import traceback
                             traceback.print_exc()
 
-                # Start background thread
                 import threading
                 thread = threading.Thread(target=_bg_detect, args=(application.id,), daemon=True)
                 thread.start()
@@ -1452,7 +1470,7 @@ def register_land():
             db.session.rollback()
             current_app.logger.exception('Application submission failed')
             flash(f'Application failed: {str(e)}', 'danger')
-            return render_template('register_land.html')
+            return render_template('register_land.html', form_data=request.form)
     
     # GET request - show the form
     return render_template('register_land.html')
@@ -1678,129 +1696,6 @@ def reject_application(app_id):
 
 
 
-@app.route('/download_certificate/<int:app_id>')
-@login_required
-def download_certificate(app_id):
-    """Generate and download a certificate for an approved application."""
-    application = LandApplication.query.get_or_404(app_id)
-    
-    # Security check
-    if current_user.role not in ['admin', 'super_admin'] and application.user_id != current_user.id:
-        flash('You do not have permission to access this certificate.', 'danger')
-        return redirect(url_for('application_status'))
-    
-    # Only approved applications get certificates
-    if application.status != 'approved':
-        flash('Certificate is only available for approved applications.', 'warning')
-        return redirect(url_for('application_status'))
-    
-    # Create an in-memory buffer
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, 
-                          topMargin=1*inch, bottomMargin=1*inch,
-                          leftMargin=0.75*inch, rightMargin=0.75*inch)
-    
-    story = []
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='CenterTitle', alignment=TA_CENTER, fontSize=20, spaceAfter=20, textColor=colors.HexColor('#003366'), fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='CenterSubtitle', alignment=TA_CENTER, fontSize=14, spaceAfter=30, textColor=colors.HexColor('#666666')))
-    styles.add(ParagraphStyle(name='CertBody', alignment=TA_CENTER, fontSize=12, spaceAfter=15, leading=18))
-    
-    # Add logo
-    logo_path = os.path.join(app.static_folder, 'images', 'zm.png')
-    if os.path.exists(logo_path):
-        from reportlab.platypus import Image
-        logo = Image(logo_path, width=1.5*inch, height=1.5*inch)
-        logo.hAlign = 'CENTER'
-        story.append(logo)
-        story.append(Spacer(1, 0.3*inch))
-    
-    # Title
-    story.append(Paragraph('REPUBLIC OF ZAMBIA', styles['CenterTitle']))
-    story.append(Paragraph('Ministry of Lands and Natural Resources', styles['CenterSubtitle']))
-    story.append(Paragraph('<b>CERTIFICATE OF LAND REGISTRATION</b>', styles['CenterTitle']))
-    story.append(Spacer(1, 0.5*inch))
-    
-    # Certificate body
-    cert_text = f"""
-    This is to certify that the land registration application bearing reference number 
-    <b>{application.reference_number}</b> has been duly processed, verified, and <b>APPROVED</b> 
-    by the Ndola Land Registry System.
-    """
-    story.append(Paragraph(cert_text, styles['CertBody']))
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Application details table
-    details_data = [
-        ['<b>Applicant Name:</b>', application.applicant_name],
-        ['<b>NRC/Passport:</b>', application.nrc_number],
-        ['<b>Land Location:</b>', application.land_location],
-        ['<b>Land Size:</b>', f'{application.land_size} hectares'],
-        ['<b>Land Use:</b>', application.land_use.replace('_', ' ').title()],
-        ['<b>Approval Date:</b>', (application.reviewed_at or application.submitted_at).strftime('%B %d, %Y')],
-    ]
-    
-    details_table = Table(details_data, colWidths=[2.5*inch, 4*inch])
-    details_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 11),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-    ]))
-    
-    story.append(details_table)
-    story.append(Spacer(1, 0.5*inch))
-    
-    # Official note
-    story.append(Paragraph(
-        'This certificate is issued under the authority of the Lands Act and serves as official '
-        'confirmation of successful land registration.', 
-        styles['CertBody']
-    ))
-    story.append(Spacer(1, 0.7*inch))
-    
-    # Signature section
-    sig_data = [
-        ['_' * 30, '_' * 30],
-        ['<b>Registry Officer</b>', '<b>Date</b>'],
-    ]
-    sig_table = Table(sig_data, colWidths=[3*inch, 3*inch])
-    sig_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TOPPADDING', (0, 1), (-1, 1), 10),
-    ]))
-    story.append(sig_table)
-    
-    # Footer
-    story.append(Spacer(1, 0.5*inch))
-    story.append(Paragraph(
-        f'<i>Certificate ID: CERT-{application.id}-{datetime.utcnow().strftime("%Y%m%d")}</i>',
-        ParagraphStyle(name='Footer', alignment=TA_CENTER, fontSize=9, textColor=colors.grey)
-    ))
-    story.append(Paragraph(
-        '<i>Ndola Land Registry System | Ministry of Lands, Zambia</i>',
-        ParagraphStyle(name='Footer2', alignment=TA_CENTER, fontSize=8, textColor=colors.grey)
-    ))
-    
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name=f'Land_Certificate_{application.reference_number}.pdf',
-        mimetype='application/pdf'
-    )
-
-
 @app.route("/generate_report")
 @login_required
 def generate_report():
@@ -1818,7 +1713,7 @@ def generate_report():
     buffer = io.BytesIO()
     
     # Create the PDF document
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.75*inch, bottomMargin=0.75*inch)
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
     
     # A list to hold the flowable objects (Paragraphs, Tables, etc.)
     story = []
@@ -1826,22 +1721,10 @@ def generate_report():
     # Get sample styles
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='Centered', alignment=TA_CENTER))
-    styles.add(ParagraphStyle(name='ReportTitle', alignment=TA_CENTER, fontSize=18, spaceAfter=12, textColor=colors.HexColor('#003366'), fontName='Helvetica-Bold'))
-
-    # Add logo
-    logo_path = os.path.join(app.static_folder, 'images', 'zm.png')
-    if os.path.exists(logo_path):
-        from reportlab.platypus import Image
-        logo = Image(logo_path, width=1.2*inch, height=1.2*inch)
-        logo.hAlign = 'CENTER'
-        story.append(logo)
-        story.append(Spacer(1, 0.2*inch))
 
     # Add a title
-    title = Paragraph("Ndola Land Registry System", styles['ReportTitle'])
+    title = Paragraph("Ndola Land Registry System - Application Report", styles['Centered'])
     story.append(title)
-    subtitle = Paragraph("<b>Land Registration Applications Report</b>", styles['Centered'])
-    story.append(subtitle)
     story.append(Spacer(1, 0.2 * inch))
 
     # Add a summary section
@@ -1906,8 +1789,799 @@ def generate_report():
     buffer.seek(0)
     return send_file(buffer, as_attachment=True, download_name='land_registry_report.pdf', mimetype='application/pdf')
 
+# --- Seller Routes ---
+@app.route('/seller/dashboard')
+@login_required
+def seller_dashboard():
+    """Seller dashboard showing their listings and stats."""
+    if current_user.role not in ['citizen', 'seller']:
+        flash("You do not have permission to access this page.", "danger")
+        return redirect(url_for("index"))
+    
+    # Get all listings for current user
+    listings = AvailableLand.query.filter_by(seller_id=current_user.id).all()
+    
+    # Calculate stats
+    total_listings = len(listings)
+    active_listings = len([l for l in listings if l.status == 'active'])
+    sold_listings = len([l for l in listings if l.status == 'sold'])
+    pending_listings = len([l for l in listings if l.admin_approval_status == 'pending'])
+    total_views = sum(l.view_count for l in listings)
+    
+    stats = {
+        'total_listings': total_listings,
+        'active_listings': active_listings,
+        'sold_listings': sold_listings,
+        'pending_listings': pending_listings,
+        'total_views': total_views
+    }
+    
+    return render_template('seller/dashboard.html', 
+                          listings=listings, 
+                          stats=stats)
 
 
+@app.route('/seller/post_land', methods=['GET', 'POST'])
+@login_required
+def post_land():
+    """Allow sellers to post new land listings."""
+    # Only users with role 'seller' may post marketplace listings
+    if current_user.role != 'seller':
+        flash("Only sellers can post land listings.", "danger")
+        return redirect(url_for("index"))
+    
+    if request.method == 'POST':
+        try:
+            # Generate listing reference
+            listing_ref = f"AL-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+            
+            # Get form data
+            title = request.form.get('title')
+            description = request.form.get('description')
+            location = request.form.get('location')
+            size = float(request.form.get('size', 0))
+            land_use = request.form.get('land_use')
+            asking_price = float(request.form.get('asking_price', 0))
+            property_type = request.form.get('property_type')
+            is_registered = request.form.get('is_registered') == 'yes'
+            seller_phone = request.form.get('seller_phone')
+            seller_email = request.form.get('seller_email')
+            seller_whatsapp = request.form.get('seller_whatsapp', '')
+            
+            # Validate required fields
+            if not all([title, description, location, size, land_use, asking_price, property_type, seller_phone, seller_email]):
+                flash('All required fields must be filled.', 'danger')
+                return render_template('seller/post_land.html')
+            
+            # Handle coordinates (optional but recommended)
+            coordinates_wkb = None
+            coordinates_json = request.form.get('coordinates')
+            if coordinates_json:
+                try:
+                    geom_dict = json.loads(coordinates_json)
+                    geom = shape(geom_dict)
+                    coordinates_wkb = from_shape(geom, srid=4326)
+                except Exception as e:
+                    current_app.logger.warning(f'Could not parse coordinates: {e}')
+            
+            # Collect amenities
+            amenities = []
+            if request.form.get('water'):
+                amenities.append('water')
+            if request.form.get('electricity'):
+                amenities.append('electricity')
+            if request.form.get('road_access'):
+                amenities.append('road_access')
+            if request.form.get('fence'):
+                amenities.append('fence')
+            if request.form.get('title_deed'):
+                amenities.append('title_deed')
+            
+            # Handle image uploads
+            images = []
+            property_images = request.files.getlist('property_images') or []
+            for idx, fileobj in enumerate(property_images[:10]):  # Max 10 images
+                if fileobj and fileobj.filename != '':
+                    try:
+                        # Create directory for listing images
+                        listing_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'listings', f'listing_{listing_ref}')
+                        os.makedirs(listing_dir, exist_ok=True)
+                        
+                        fname = secure_filename(fileobj.filename)
+                        timestamp = int(time.time())
+                        random_token = secrets.token_hex(6)
+                        unique_filename = f"image-{timestamp}-{random_token}-{fname}"
+                        
+                        filepath = os.path.join(listing_dir, unique_filename)
+                        fileobj.save(filepath)
+                        
+                        images.append(unique_filename)
+                    except Exception as e:
+                        current_app.logger.error(f'Error saving image: {e}')
+            
+            # Handle supporting documents (admin only)
+            documents = []
+            supporting_docs = request.files.getlist('supporting_documents') or []
+            for idx, fileobj in enumerate(supporting_docs):
+                if fileobj and fileobj.filename != '':
+                    try:
+                        doc_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'listings', f'listing_{listing_ref}', 'docs')
+                        os.makedirs(doc_dir, exist_ok=True)
+                        
+                        fname = secure_filename(fileobj.filename)
+                        timestamp = int(time.time())
+                        random_token = secrets.token_hex(6)
+                        unique_filename = f"doc-{timestamp}-{random_token}-{fname}"
+                        
+                        filepath = os.path.join(doc_dir, unique_filename)
+                        fileobj.save(filepath)
+                        
+                        documents.append(unique_filename)
+                    except Exception as e:
+                        current_app.logger.error(f'Error saving document: {e}')
+            
+            # Create AvailableLand record
+            available_land = AvailableLand(
+                listing_reference=listing_ref,
+                title=title,
+                description=description,
+                location=location,
+                size=size,
+                land_use=land_use,
+                asking_price=asking_price,
+                property_type=property_type,
+                is_registered=is_registered,
+                coordinates=coordinates_wkb,
+                seller_id=current_user.id,
+                seller_name=f"{current_user.first_name} {current_user.last_name}".strip() or current_user.username,
+                seller_phone=seller_phone,
+                seller_email=seller_email,
+                seller_whatsapp=seller_whatsapp,
+                amenities=amenities if amenities else None,
+                images=images if images else None,
+                documents=documents if documents else None,
+                # FIXED: Seller listings should be pending admin approval before showing publicly
+                status='pending',
+                admin_approval_status='pending',
+                approved_at=None
+            )
+            
+            db.session.add(available_land)
+            db.session.commit()
+            
+            log_audit('create_land_listing', 'available_lands', available_land.id, None, {
+                'title': title,
+                'reference': listing_ref
+            })
+            
+            flash(f'Land listing submitted successfully! Reference: {listing_ref}. Your listing is pending admin approval.', 'success')
+            return redirect(url_for('seller_dashboard'))
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception('Error creating land listing')
+            flash(f'Error creating listing: {str(e)}', 'danger')
+            return render_template('seller/post_land.html')
+    
+    # GET request - show the form
+    return render_template('seller/post_land.html')
+
+
+@app.route('/seller/listing/<int:listing_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_listing(listing_id):
+    """Edit an existing land listing."""
+    if current_user.role != 'seller':
+        flash('Only sellers can edit listings.', 'danger')
+        return redirect(url_for('index'))
+    
+    listing = AvailableLand.query.get_or_404(listing_id)
+    
+    # Security check: ensure the current user owns this listing
+    if listing.seller_id != current_user.id:
+        flash('You do not have permission to edit this listing.', 'danger')
+        return redirect(url_for('seller_dashboard'))
+    
+    if request.method == 'POST':
+        try:
+            # Update listing fields
+            listing.title = request.form.get('title')
+            listing.description = request.form.get('description')
+            listing.location = request.form.get('location')
+            listing.size = float(request.form.get('size', 0))
+            listing.land_use = request.form.get('land_use')
+            listing.asking_price = float(request.form.get('asking_price', 0))
+            listing.property_type = request.form.get('property_type')
+            listing.is_registered = request.form.get('is_registered') == 'yes'
+            listing.seller_phone = request.form.get('seller_phone')
+            listing.seller_email = request.form.get('seller_email')
+            listing.seller_whatsapp = request.form.get('seller_whatsapp', '')
+            
+            # Update coordinates if provided
+            coordinates_json = request.form.get('coordinates')
+            if coordinates_json:
+                try:
+                    geom_dict = json.loads(coordinates_json)
+                    geom = shape(geom_dict)
+                    listing.coordinates = from_shape(geom, srid=4326)
+                except Exception as e:
+                    current_app.logger.warning(f'Could not parse coordinates: {e}')
+            
+            # Update amenities
+            amenities = []
+            if request.form.get('water'):
+                amenities.append('water')
+            if request.form.get('electricity'):
+                amenities.append('electricity')
+            if request.form.get('road_access'):
+                amenities.append('road_access')
+            if request.form.get('fence'):
+                amenities.append('fence')
+            if request.form.get('title_deed'):
+                amenities.append('title_deed')
+            listing.amenities = amenities if amenities else None
+            
+            db.session.commit()
+            
+            log_audit('update_listing', 'available_lands', listing.id, None, {
+                'title': listing.title
+            })
+            
+            flash('Listing updated successfully!', 'success')
+            return redirect(url_for('seller_dashboard'))
+            
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception('Error updating listing')
+            flash(f'Error updating listing: {str(e)}', 'danger')
+    
+    # GET request - show the form with existing data
+    return render_template('seller/edit_land.html', listing=listing)
+
+
+@app.route('/seller/listing/<int:listing_id>/delete', methods=['POST'])
+@login_required
+def delete_listing(listing_id):
+    """Delete a land listing."""
+    if current_user.role != 'seller':
+        flash('Only sellers can delete listings.', 'danger')
+        return redirect(url_for('index'))
+    
+    listing = AvailableLand.query.get_or_404(listing_id)
+    
+    # Security check: ensure the current user owns this listing
+    if listing.seller_id != current_user.id:
+        flash('You do not have permission to delete this listing.', 'danger')
+        return redirect(url_for('seller_dashboard'))
+    
+    try:
+        # Mark as deleted (soft delete) rather than actually deleting
+        listing.status = 'deleted'
+        db.session.commit()
+        
+        log_audit('delete_listing', 'available_lands', listing.id, None, {
+            'title': listing.title,
+            'reference': listing.listing_reference
+        })
+        
+        flash('Listing deleted successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('Error deleting listing')
+        flash(f'Error deleting listing: {str(e)}', 'danger')
+    
+    return redirect(url_for('seller_dashboard'))
+
+
+@app.route('/available_lands')
+@app.route('/available-lands')  # Add hyphenated alias for URL consistency
+def available_lands():
+    """Browse available lands - public page."""
+    return render_template('available_lands.html')
+
+
+# --- API Endpoints for Available Lands ---
+@app.route('/api/available-lands')
+def api_available_lands():
+    """API endpoint to get available lands listings."""
+    try:
+        land_type = request.args.get('land_type', 'unregistered').lower()
+        property_type = request.args.get('property_type', '').lower()
+        land_use = request.args.get('land_use', '').lower()
+        min_price = request.args.get('min_price', type=float)
+        max_price = request.args.get('max_price', type=float)
+        min_size = request.args.get('min_size', type=float)
+        
+        # Base query - ONLY show approved and active listings to public
+        query = AvailableLand.query.filter(
+            AvailableLand.status == 'active',
+            AvailableLand.admin_approval_status == 'approved'
+        )
+        
+        # Filter by land type
+        if land_type == 'registered':
+            query = query.filter(AvailableLand.is_registered == True)
+        else:  # unregistered
+            query = query.filter(AvailableLand.is_registered == False)
+        
+        # Filter by property type
+        if property_type and property_type != '':
+            query = query.filter(AvailableLand.property_type == property_type)
+        
+        # Filter by land use
+        if land_use and land_use != '':
+            query = query.filter(AvailableLand.land_use == land_use)
+        
+        # Filter by price range
+        if min_price is not None:
+            query = query.filter(AvailableLand.asking_price >= min_price)
+        if max_price is not None:
+            query = query.filter(AvailableLand.asking_price <= max_price)
+        
+        # Filter by minimum size
+        if min_size is not None:
+            query = query.filter(AvailableLand.size >= min_size)
+        
+        listings = query.order_by(AvailableLand.created_at.desc()).all()
+        
+        # Increment view count for each listing
+        for listing in listings:
+            listing.view_count = (listing.view_count or 0) + 1
+        db.session.commit()
+        
+        # Build response
+        result = {
+            'listings': []
+        }
+        
+        for listing in listings:
+            # Get first image if available
+            listing_image = None
+            if listing.images and len(listing.images) > 0:
+                listing_image = f"/static/listings/{listing.listing_reference}/{listing.images[0]}"
+            
+            result['listings'].append({
+                'id': listing.id,
+                'listing_reference': listing.listing_reference,
+                'title': listing.title,
+                'description': listing.description[:200] + '...' if len(listing.description) > 200 else listing.description,
+                'location': listing.location,
+                'size': listing.size,
+                'property_type': listing.property_type,
+                'land_use': listing.land_use,
+                'asking_price': listing.asking_price,
+                'is_registered': listing.is_registered,
+                'seller_name': listing.seller_name,
+                'seller_phone': listing.seller_phone,
+                'seller_email': listing.seller_email,
+                'amenities': listing.amenities or [],
+                'image': listing_image,
+                'details_url': url_for('land_details', listing_id=listing.id),
+                'view_count': listing.view_count
+            })
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        current_app.logger.exception('Error fetching available lands')
+        return jsonify({'error': str(e), 'listings': []}), 500
+
+
+@app.route('/api/available-lands-geojson')
+def api_available_lands_geojson():
+    """API endpoint to get available lands as GeoJSON for map display."""
+    try:
+        land_type = request.args.get('land_type', 'unregistered').lower()
+        
+        # Base query - ONLY show approved and active listings with coordinates
+        query = AvailableLand.query.filter(
+            AvailableLand.status == 'active',
+            AvailableLand.admin_approval_status == 'approved',
+            AvailableLand.coordinates != None
+        )
+        
+        # Filter by land type
+        if land_type == 'registered':
+            query = query.filter(AvailableLand.is_registered == True)
+        else:  # unregistered
+            query = query.filter(AvailableLand.is_registered == False)
+        
+        listings = query.all()
+        
+        # Build GeoJSON FeatureCollection
+        features = []
+        for listing in listings:
+            try:
+                if listing.coordinates:
+                    geom = to_shape(listing.coordinates)
+                    
+                    # Get centroid for marker placement
+                    centroid = geom.centroid
+                    
+                    feature = {
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'Point',
+                            'coordinates': [centroid.x, centroid.y]
+                        },
+                        'properties': {
+                            'id': listing.id,
+                            'title': listing.title,
+                            'location': listing.location,
+                            'size': listing.size,
+                            'asking_price': listing.asking_price,
+                            'property_type': listing.property_type,
+                            'is_registered': listing.is_registered,
+                            'seller_name': listing.seller_name,
+                            'seller_phone': listing.seller_phone,
+                            'seller_email': listing.seller_email,
+                            'land_use': listing.land_use,
+                            'details_url': url_for('land_details', listing_id=listing.id)
+                        }
+                    }
+                    features.append(feature)
+            except Exception as e:
+                current_app.logger.error(f'Error processing listing {listing.id}: {e}')
+        
+        # Return FeatureCollection
+        geojson = {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+        
+        return jsonify(geojson)
+    
+    except Exception as e:
+        current_app.logger.exception('Error generating GeoJSON')
+        return jsonify({'type': 'FeatureCollection', 'features': []}), 500
+
+
+@app.route('/api/available-lands-debug')
+def api_available_lands_debug():
+    """Debug endpoint to check available lands data in database."""
+    try:
+        total = AvailableLand.query.count()
+        active = AvailableLand.query.filter_by(status='active').count()
+        pending = AvailableLand.query.filter_by(status='pending').count()
+        approved = AvailableLand.query.filter_by(admin_approval_status='approved').count()
+        pending_approval = AvailableLand.query.filter_by(admin_approval_status='pending').count()
+        registered = AvailableLand.query.filter_by(is_registered=True).count()
+        unregistered = AvailableLand.query.filter_by(is_registered=False).count()
+        
+        # Get sample listings
+        samples = AvailableLand.query.limit(5).all()
+        sample_data = []
+        for s in samples:
+            sample_data.append({
+                'id': s.id,
+                'reference': s.listing_reference,
+                'status': s.status,
+                'admin_approval_status': s.admin_approval_status,
+                'is_registered': s.is_registered,
+                'title': s.title,
+                'location': s.location
+            })
+        
+        return jsonify({
+            'database_stats': {
+                'total_listings': total,
+                'by_status': {'active': active, 'pending': pending},
+                'by_approval': {'approved': approved, 'pending': pending_approval},
+                'by_registration': {'registered': registered, 'unregistered': unregistered}
+            },
+            'sample_listings': sample_data
+        })
+    except Exception as e:
+        current_app.logger.exception('Debug endpoint error')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/land_details/<int:listing_id>')
+def land_details(listing_id):
+    """View details of a specific land listing."""
+    listing = AvailableLand.query.get_or_404(listing_id)
+    
+    # Check if listing is active and approved
+    if listing.status != 'active' or listing.admin_approval_status != 'approved':
+        if not current_user.is_authenticated or (current_user.id != listing.seller_id and current_user.role not in ['admin', 'super_admin']):
+            flash('This listing is not available.', 'danger')
+            return redirect(url_for('available_lands'))
+    
+    # Increment view count
+    listing.view_count = (listing.view_count or 0) + 1
+    db.session.commit()
+    
+    return render_template('land_details.html', listing=listing)
+
+
+# --- Admin: Seller Listings Management ---
+@app.route('/admin/seller-listings')
+@login_required
+def admin_seller_listings():
+    if current_user.role not in ['admin', 'super_admin']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    status_filter = request.args.get('status', 'pending')
+    q = AvailableLand.query
+    if status_filter == 'pending':
+        q = q.filter(AvailableLand.admin_approval_status == 'pending')
+    elif status_filter == 'approved':
+        q = q.filter(AvailableLand.admin_approval_status == 'approved')
+    elif status_filter == 'rejected':
+        q = q.filter(AvailableLand.admin_approval_status == 'rejected')
+
+    listings = q.order_by(AvailableLand.created_at.desc()).all()
+
+    pending_count = AvailableLand.query.filter_by(admin_approval_status='pending').count()
+    approved_count = AvailableLand.query.filter_by(admin_approval_status='approved').count()
+    rejected_count = AvailableLand.query.filter_by(admin_approval_status='rejected').count()
+
+    return render_template('admin_seller_listings.html', listings=listings,
+                           status_filter=status_filter,
+                           pending_count=pending_count,
+                           approved_count=approved_count,
+                           rejected_count=rejected_count)
+
+
+@app.route('/admin/seller-listing/<int:listing_id>')
+@login_required
+def view_seller_listing_admin(listing_id):
+    if current_user.role not in ['admin', 'super_admin']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    listing = AvailableLand.query.get_or_404(listing_id)
+
+    # Convert coordinates to GeoJSON if present
+    coordinates_geojson = None
+    try:
+        if listing.coordinates:
+            geom = to_shape(listing.coordinates)
+            coordinates_geojson = geom.__geo_interface__
+    except Exception:
+        coordinates_geojson = None
+
+    return render_template('admin_view_listing.html', listing=listing, listing_id=listing.id, listing_reference=listing.listing_reference,
+                           listing_coordinates_geojson=coordinates_geojson,
+                           listing_coordinates=coordinates_geojson,
+                           coordinates_geojson=coordinates_geojson,
+                           now=datetime.utcnow)
+
+
+@app.route('/admin/seller-listing/<int:listing_id>/approve', methods=['POST'])
+@login_required
+def approve_seller_listing(listing_id):
+    if current_user.role not in ['admin', 'super_admin']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    listing = AvailableLand.query.get_or_404(listing_id)
+    comments = request.form.get('admin_comments')
+    try:
+        listing.admin_approval_status = 'approved'
+        listing.status = 'active'
+        listing.approved_by = current_user.id
+        listing.approved_at = datetime.utcnow()
+
+        # Save approval note into admin_comments JSON
+        ac = listing.admin_comments or {}
+        ac.setdefault('approval', {})
+        ac['approval'] = {
+            'admin_id': current_user.id,
+            'admin_name': current_user.get_full_name(),
+            'comment': comments or '',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        listing.admin_comments = ac
+
+        db.session.add(listing)
+        db.session.commit()
+        log_audit('approve_seller_listing', 'available_lands', listing.id, None, {'approved_by': current_user.id})
+        flash('Listing approved and is now active.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('Failed to approve listing')
+        flash(f'Failed to approve listing: {e}', 'danger')
+
+    return redirect(url_for('admin_seller_listings'))
+
+
+@app.route('/admin/seller-listing/<int:listing_id>/reject', methods=['POST'])
+@login_required
+def reject_seller_listing(listing_id):
+    if current_user.role not in ['admin', 'super_admin']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    listing = AvailableLand.query.get_or_404(listing_id)
+    reason = request.form.get('rejection_reason') or 'Rejected by admin'
+    try:
+        listing.admin_approval_status = 'rejected'
+        listing.status = 'rejected'
+
+        ac = listing.admin_comments or {}
+        ac.setdefault('rejection', {})
+        ac['rejection'] = {
+            'admin_id': current_user.id,
+            'admin_name': current_user.get_full_name(),
+            'reason': reason,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        listing.admin_comments = ac
+
+        db.session.add(listing)
+        db.session.commit()
+        log_audit('reject_seller_listing', 'available_lands', listing.id, None, {'rejected_by': current_user.id})
+        flash('Listing rejected.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception('Failed to reject listing')
+        flash(f'Failed to reject listing: {e}', 'danger')
+
+    return redirect(url_for('admin_seller_listings'))
+
+
+@app.route('/admin/seller-listing/<int:listing_id>/comment', methods=['POST'])
+@login_required
+def add_listing_comment(listing_id):
+    if current_user.role not in ['admin', 'super_admin']:
+        return jsonify({'error': 'Access denied'}), 403
+
+    listing = AvailableLand.query.get_or_404(listing_id)
+    comment = request.form.get('comment')
+    if not comment:
+        flash('Comment cannot be empty.', 'danger')
+        return redirect(url_for('view_seller_listing_admin', listing_id=listing_id))
+
+    try:
+        ac = listing.admin_comments or {}
+        comments = ac.get('comments', [])
+        comments.insert(0, {
+            'admin_id': current_user.id,
+            'admin_name': current_user.get_full_name(),
+            'comment': comment,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+        ac['comments'] = comments
+        listing.admin_comments = ac
+        db.session.add(listing)
+        db.session.commit()
+        flash('Comment added.', 'success')
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('Failed to add listing comment')
+        flash('Failed to add comment.', 'danger')
+
+    return redirect(url_for('view_seller_listing_admin', listing_id=listing_id))
+
+
+@app.route('/manual_land_entry', methods=['GET', 'POST'])
+@login_required
+def manual_land_entry():
+    if current_user.role not in ['admin', 'super_admin']:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    if request.method == 'POST':
+        try:
+            # Create an application reference with LR-M- prefix
+            reference = f"LR-M-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+            applicant_name = request.form.get('applicant_name') or 'Manual Entry'
+            nrc = request.form.get('nrc_number') or ''
+            phone = request.form.get('phone_number') or ''
+            email = request.form.get('email') or ''
+            tpin = request.form.get('tpin_number') or ''
+            location = request.form.get('land_location') or 'Unknown'
+            size = float(request.form.get('land_size', 0) or 0)
+            land_use = request.form.get('land_use') or 'unspecified'
+            description = request.form.get('land_description') or ''
+            geom_json = request.form.get('land_geometry')
+
+            coords_wkb = None
+            if geom_json:
+                try:
+                    geom_dict = json.loads(geom_json)
+                    geom = shape(geom_dict)
+                    coords_wkb = from_shape(geom, srid=4326)
+                except Exception:
+                    coords_wkb = None
+
+            # Create a LandApplication record (manual admin entry should not create a public listing)
+            application = LandApplication(
+                reference_number=reference,
+                applicant_name=applicant_name,
+                nrc_number=nrc,
+                tpin_number=tpin,
+                phone_number=phone,
+                email=email,
+                land_location=location,
+                land_size=size,
+                land_use=land_use,
+                land_description=description,
+                declared_value=0.0,
+                status='approved',
+                priority='medium',
+                ai_conflict_score=0.0,
+                ai_duplicate_score=0.0,
+                ai_processed=False,
+                processing_fee=0.0,
+                payment_status='paid',
+                admin_comments='Manual admin entry',
+                submitted_at=datetime.utcnow(),
+                reviewed_at=datetime.utcnow(),
+                approved_at=datetime.utcnow(),
+                user_id=None,
+                registration_type='manual'
+            )
+
+            if coords_wkb:
+                application.coordinates = coords_wkb
+
+            db.session.add(application)
+            db.session.commit()
+            log_audit('manual_land_entry', 'land_applications', application.id, None, {'created_by': current_user.id})
+            flash('Manual land application saved and approved (not a public listing).', 'success')
+            return redirect(url_for('admin_dashboard'))
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception('Failed to create manual land entry')
+            flash('Failed to save manual entry.', 'danger')
+
+    return render_template('admin_manual_entry.html')
+
+
+@app.route('/admin/debug/available-lands')
+@login_required
+def admin_debug_available_lands():
+    """Admin-only debug endpoint returning counts and recent AvailableLand rows.
+
+    Use this to quickly inspect which rows are active/approved and whether
+    geometry/flags match the API filters.
+    """
+    if current_user.role not in ['admin', 'super_admin']:
+        return jsonify({'error': 'Access denied'}), 403
+
+    try:
+        total = AvailableLand.query.count()
+        approved_active = AvailableLand.query.filter(
+            AvailableLand.admin_approval_status == 'approved',
+            AvailableLand.status == 'active'
+        ).count()
+        pending = AvailableLand.query.filter(AvailableLand.admin_approval_status == 'pending').count()
+        rejected = AvailableLand.query.filter(AvailableLand.admin_approval_status == 'rejected').count()
+
+        samples = AvailableLand.query.order_by(AvailableLand.created_at.desc()).limit(50).all()
+        rows = []
+        for s in samples:
+            rows.append({
+                'id': s.id,
+                'listing_reference': getattr(s, 'listing_reference', None),
+                'status': getattr(s, 'status', None),
+                'admin_approval_status': getattr(s, 'admin_approval_status', None),
+                'is_registered': getattr(s, 'is_registered', None),
+                'property_type': getattr(s, 'property_type', None),
+                'land_use': getattr(s, 'land_use', None),
+                'asking_price': getattr(s, 'asking_price', None),
+                'size': getattr(s, 'size', None),
+                'has_coordinates': bool(getattr(s, 'coordinates', None)),
+                'latitude': getattr(s, 'latitude', None),
+                'longitude': getattr(s, 'longitude', None),
+                'seller_id': getattr(s, 'seller_id', None),
+                'created_at': getattr(s, 'created_at').isoformat() if getattr(s, 'created_at', None) else None
+            })
+
+        return jsonify({
+            'total': total,
+            'approved_active': approved_active,
+            'pending': pending,
+            'rejected': rejected,
+            'samples': rows
+        })
+    except Exception:
+        current_app.logger.exception('Debug endpoint failed')
+        return jsonify({'error': 'internal'}), 500
 
 
 # --- Error Handlers ---

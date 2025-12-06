@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+
+{% block title %}Seller Dashboard — Ndola Land Registry{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+    .stats-card {
+        border-radius: 12px;
+        padding: 1.5rem;
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        transition: transform 0.3s ease;
+    }
+    .stats-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    }
+    .stats-icon {
+        width: 50px;
+        height: 50px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+    }
+    .listing-card {
+        background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+    
+    /* Dark mode support */
+    [data-theme="dark"] .stats-card,
+    [data-theme="dark"] .listing-card {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .stats-card:hover,
+    [data-theme="dark"] .listing-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    [data-theme="dark"] h2,
+    [data-theme="dark"] h3,
+    [data-theme="dark"] h4,
+    [data-theme="dark"] h5,
+    [data-theme="dark"] h6 {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+    [data-theme="dark"] .table {
+        color: #e2e8f0;
+    
+    .listing-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        transform: translateY(-2px);
+    }
+    .badge-custom {
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="fw-bold"><i class="fas fa-store me-2"></i>Seller Dashboard</h2>
+            <p class="text-muted">Manage your land listings and track performance</p>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="d-flex align-items-center">
+                    <div class="stats-icon bg-primary bg-opacity-10 text-primary">
+                        <i class="fas fa-list"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h6 class="text-muted mb-1">Total Listings</h6>
+                        <h3 class="mb-0">{{ stats.total_listings }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="d-flex align-items-center">
+                    <div class="stats-icon bg-success bg-opacity-10 text-success">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h6 class="text-muted mb-1">Active Listings</h6>
+                        <h3 class="mb-0">{{ stats.active_listings }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="d-flex align-items-center">
+                    <div class="stats-icon bg-info bg-opacity-10 text-info">
+                        <i class="fas fa-shopping-cart"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h6 class="text-muted mb-1">Sold</h6>
+                        <h3 class="mb-0">{{ stats.sold_listings }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="d-flex align-items-center">
+                    <div class="stats-icon bg-warning bg-opacity-10 text-warning">
+                        <i class="fas fa-eye"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h6 class="text-muted mb-1">Total Views</h6>
+                        <h3 class="mb-0">{{ stats.total_views }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <a href="{{ url_for('post_land') }}" class="btn btn-primary btn-lg">
+                <i class="fas fa-plus-circle me-2"></i>Post New Land
+            </a>
+            <a href="{{ url_for('available_lands') }}" class="btn btn-outline-secondary btn-lg">
+                <i class="fas fa-globe me-2"></i>View All Listings
+            </a>
+        </div>
+    </div>
+
+    <!-- Listings Table -->
+    <div class="card shadow-sm">
+        <div class="card-header bg-white py-3">
+            <h5 class="mb-0"><i class="fas fa-th-list me-2"></i>My Listings</h5>
+        </div>
+        <div class="card-body">
+            {% if listings %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Reference</th>
+                            <th>Title</th>
+                            <th>Location</th>
+                            <th>Size</th>
+                            <th>Price</th>
+                            <th>Status</th>
+                            <th>Views</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for listing in listings %}
+                        <tr>
+                            <td><strong>{{ listing.listing_reference }}</strong></td>
+                            <td>{{ listing.title }}</td>
+                            <td>{{ listing.location }}</td>
+                            <td>{{ listing.size }} ha</td>
+                            <td>K{{ "{:,.2f}".format(listing.asking_price) }}</td>
+                            <td>
+                                {% if listing.admin_approval_status == 'pending' %}
+                                <span class="badge bg-warning text-dark">
+                                    <i class="fas fa-clock"></i> Pending Approval
+                                </span>
+                                {% elif listing.admin_approval_status == 'rejected' %}
+                                <span class="badge bg-danger">
+                                    <i class="fas fa-times"></i> Rejected
+                                </span>
+                                {% else %}
+                                <span class="badge {{ listing.get_status_badge_class() }}">
+                                    {{ listing.status|capitalize }}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <i class="fas fa-eye text-muted"></i> {{ listing.view_count }}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('land_details', listing_id=listing.id) }}" 
+                                   class="btn btn-sm btn-outline-primary" title="View">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{{ url_for('edit_listing', listing_id=listing.id) }}" 
+                                   class="btn btn-sm btn-outline-warning" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <form action="{{ url_for('delete_listing', listing_id=listing.id) }}" 
+                                      method="POST" class="d-inline"
+                                      onsubmit="return confirm('Are you sure you want to delete this listing?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-inbox fa-4x text-muted mb-3"></i>
+                <h5 class="text-muted">No listings yet</h5>
+                <p class="text-muted">Start by posting your first land listing!</p>
+                <a href="{{ url_for('post_land') }}" class="btn btn-primary">
+                    <i class="fas fa-plus-circle me-2"></i>Post Your First Land
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

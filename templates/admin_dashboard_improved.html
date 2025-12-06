@@ -360,6 +360,12 @@
                                 <a href="{{ url_for('admin_notifications') }}" class="btn btn-outline-secondary btn-sm">
                                     <i class="fas fa-bell me-2"></i>Notifications
                                 </a>
+                                <a href="{{ url_for('admin_seller_listings') }}" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-store me-2"></i>Seller Listings
+                                </a>
+                                <a href="{{ url_for('manual_land_entry') }}" class="btn btn-outline-info btn-sm">
+                                    <i class="fas fa-file-alt me-2"></i>Manual Entry
+                                </a>
                                 {% if current_user.role == 'super_admin' %}
                                 <a href="{{ url_for('ai_training_data') }}" class="btn btn-outline-info btn-sm">
                                     <i class="fas fa-database me-2"></i>View Training Data

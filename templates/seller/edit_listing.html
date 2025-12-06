@@ -1,0 +1,266 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Listing — Ndola Land Registry{% endblock %}
+
+{% block head %}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+<style>
+    .form-section {
+        background: var(--bs-body-bg);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border: 1px solid var(--bs-border-color);
+    }
+    .section-title {
+        border-bottom: 2px solid #0d6efd;
+        padding-bottom: 0.5rem;
+        margin-bottom: 1.5rem;
+        color: var(--bs-body-color);
+    }
+    #map {
+        height: 400px;
+        border-radius: 8px;
+        border: 1px solid var(--bs-border-color);
+    }
+    .amenity-checkbox {
+        padding: 1rem;
+        border: 2px solid var(--bs-border-color);
+        border-radius: 8px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        background: var(--bs-body-bg);
+    }
+    .amenity-checkbox:hover {
+        border-color: #0d6efd;
+        background: var(--bs-secondary-bg);
+    }
+    .amenity-checkbox input:checked + label {
+        color: #0d6efd;
+        font-weight: 600;
+    }
+    
+    /* Dark mode support */
+    [data-theme="dark"] .form-section {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .amenity-checkbox {
+        background: #2d3748;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .amenity-checkbox:hover {
+        background: #374151;
+    }
+    [data-theme="dark"] .section-title {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .form-control,
+    [data-theme="dark"] .form-select {
+        background-color: #374151;
+        color: #e2e8f0;
+        border-color: #4a5568;
+    }
+    [data-theme="dark"] .form-label {
+        color: #e2e8f0;
+    }
+    [data-theme="dark"] .text-muted {
+        color: #a0aec0 !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row">
+        <div class="col-lg-10 mx-auto">
+            <div class="mb-4">
+                <h2 class="fw-bold"><i class="fas fa-edit me-2"></i>Edit Listing</h2>
+                <p class="text-muted">Update your listing: {{ listing.listing_reference }}</p>
+            </div>
+
+            <form method="POST" action="{{ url_for('edit_listing', listing_id=listing.id) }}">
+                <!-- Basic Information -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-info-circle me-2"></i>Basic Information</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" name="title" class="form-control" required 
+                                   value="{{ listing.title }}">
+                        </div>
+                        
+                        <div class="col-md-12">
+                            <label class="form-label">Description <span class="text-danger">*</span></label>
+                            <textarea name="description" class="form-control" rows="4" required>{{ listing.description }}</textarea>
+                        </div>
+                        
+                        <div class="col-md-8">
+                            <label class="form-label">Location <span class="text-danger">*</span></label>
+                            <input type="text" name="location" class="form-control" required 
+                                   value="{{ listing.location }}">
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label">Size (hectares) <span class="text-danger">*</span></label>
+                            <input type="number" name="size" step="0.01" class="form-control" required
+                                   value="{{ listing.size }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Property Details -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-home me-2"></i>Property Details</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Property Type <span class="text-danger">*</span></label>
+                            <select name="property_type" class="form-select" required>
+                                <option value="unregistered_land" {% if listing.property_type == 'unregistered_land' %}selected{% endif %}>Unregistered Land</option>
+                                <option value="plot" {% if listing.property_type == 'plot' %}selected{% endif %}>Plot</option>
+                                <option value="house" {% if listing.property_type == 'house' %}selected{% endif %}>House with Land</option>
+                                <option value="commercial_property" {% if listing.property_type == 'commercial_property' %}selected{% endif %}>Commercial Property</option>
+                                <option value="agricultural_land" {% if listing.property_type == 'agricultural_land' %}selected{% endif %}>Agricultural Land</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Land Use <span class="text-danger">*</span></label>
+                            <select name="land_use" class="form-select" required>
+                                <option value="residential" {% if listing.land_use == 'residential' %}selected{% endif %}>Residential</option>
+                                <option value="commercial" {% if listing.land_use == 'commercial' %}selected{% endif %}>Commercial</option>
+                                <option value="agricultural" {% if listing.land_use == 'agricultural' %}selected{% endif %}>Agricultural</option>
+                                <option value="industrial" {% if listing.land_use == 'industrial' %}selected{% endif %}>Industrial</option>
+                                <option value="mixed" {% if listing.land_use == 'mixed' %}selected{% endif %}>Mixed Use</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Asking Price (ZMW) <span class="text-danger">*</span></label>
+                            <input type="number" name="asking_price" step="0.01" class="form-control" required
+                                   value="{{ listing.asking_price }}">
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Is this land registered? <span class="text-danger">*</span></label>
+                            <select name="is_registered" class="form-select" required>
+                                <option value="no" {% if not listing.is_registered %}selected{% endif %}>No - Unregistered Land</option>
+                                <option value="yes" {% if listing.is_registered %}selected{% endif %}>Yes - Has Title Deed</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Status <span class="text-danger">*</span></label>
+                            <select name="status" class="form-select" required>
+                                <option value="active" {% if listing.status == 'active' %}selected{% endif %}>Active</option>
+                                <option value="sold" {% if listing.status == 'sold' %}selected{% endif %}>Sold</option>
+                                <option value="withdrawn" {% if listing.status == 'withdrawn' %}selected{% endif %}>Withdrawn</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Amenities -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-plug me-2"></i>Amenities</h4>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="water" id="water"
+                                           {% if 'water' in listing.amenities %}checked{% endif %}>
+                                    <label class="form-check-label" for="water">
+                                        <i class="fas fa-tint me-2"></i>Water Available
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="electricity" id="electricity"
+                                           {% if 'electricity' in listing.amenities %}checked{% endif %}>
+                                    <label class="form-check-label" for="electricity">
+                                        <i class="fas fa-bolt me-2"></i>Electricity
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="road_access" id="road_access"
+                                           {% if 'road_access' in listing.amenities %}checked{% endif %}>
+                                    <label class="form-check-label" for="road_access">
+                                        <i class="fas fa-road me-2"></i>Road Access
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="fence" id="fence"
+                                           {% if 'fence' in listing.amenities %}checked{% endif %}>
+                                    <label class="form-check-label" for="fence">
+                                        <i class="fas fa-border-style me-2"></i>Fenced
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="amenity-checkbox">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="title_deed" id="title_deed"
+                                           {% if 'title_deed' in listing.amenities %}checked{% endif %}>
+                                    <label class="form-check-label" for="title_deed">
+                                        <i class="fas fa-certificate me-2"></i>Title Deed Available
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                <div class="form-section">
+                    <h4 class="section-title"><i class="fas fa-phone me-2"></i>Contact Information</h4>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Phone Number <span class="text-danger">*</span></label>
+                            <input type="tel" name="seller_phone" class="form-control" required
+                                   value="{{ listing.seller_phone }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Email <span class="text-danger">*</span></label>
+                            <input type="email" name="seller_email" class="form-control" required
+                                   value="{{ listing.seller_email }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">WhatsApp (Optional)</label>
+                            <input type="tel" name="seller_whatsapp" class="form-control"
+                                   value="{{ listing.seller_whatsapp or '' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submit Buttons -->
+                <div class="text-center">
+                    <button type="submit" class="btn btn-primary btn-lg px-5">
+                        <i class="fas fa-save me-2"></i>Update Listing
+                    </button>
+                    <a href="{{ url_for('seller_dashboard') }}" class="btn btn-outline-secondary btn-lg px-5">
+                        <i class="fas fa-times me-2"></i>Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

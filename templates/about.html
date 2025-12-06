@@ -8,14 +8,46 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
+        body {
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0d6efd 0%, #198754 100%);
+            opacity: 0.03;
+            z-index: -1;
+        }
+        
+        html[data-theme="dark"] body::before {
+            background: linear-gradient(135deg, #0c4a6e 0%, #065f46 100%);
+            opacity: 0.08;
+        }
+        
         .logo-section {
             background: linear-gradient(135deg, #0d6efd 0%, #198754 100%);
             padding: 3rem 0;
+        }
+        
+        html[data-theme="dark"] .logo-section {
+            background: linear-gradient(135deg, #0c4a6e 0%, #065f46 100%);
         }
         .resource-card {
             transition: transform 0.3s;
             border: 1px solid #e9ecef;
             border-radius: 8px;
+            background: white;
+        }
+        
+        html[data-theme="dark"] .resource-card {
+            background: #071a2b;
+            border-color: rgba(255, 255, 255, 0.1);
         }
         .resource-card:hover {
             transform: translateY(-5px);
@@ -26,10 +58,23 @@
             border-radius: 8px;
             padding: 1rem;
             transition: all 0.3s;
+            border: 1px solid #e9ecef;
         }
+        
+        html[data-theme="dark"] .quick-link-card {
+            background: #071a2b;
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        
         .quick-link-card:hover {
             background: #f8f9fa;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transform: translateY(-2px);
+        }
+        
+        html[data-theme="dark"] .quick-link-card:hover {
+            background: #0b2233;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
     </style>
 </head>
@@ -76,9 +121,9 @@
     </div>
 
     <!-- Logo Section -->
-    <section class="logo-section text-white text-center">
-        <div class="container">
-            <img src="{{ url_for('static', filename='images/zambia.jpg') }}" alt="Zambia" class="img-fluid mb-3" style="max-height: 150px; border-radius: 8px;">
+    <section class="logo-section logo-section-with-bg text-white text-center">
+        <div class="hero-overlay"></div>
+        <div class="container" style="position: relative; z-index: 2;">
             <h1 class="display-4 mb-2"><i class="fas fa-info-circle me-3"></i>About Ndola Land Registry</h1>
             <p class="lead mb-0">Ministry of Lands and Natural Resources | Ndola City Council</p>
         </div>

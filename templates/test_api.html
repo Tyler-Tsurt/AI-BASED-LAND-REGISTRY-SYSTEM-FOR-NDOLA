@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Available Lands Debug Test</title>
+    <script>
+        // Test if page loads
+        console.log('=== DEBUG PAGE LOADED ===');
+        
+        // Test API call
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, testing API...');
+            
+            // Test 1: Direct API call
+            fetch('/api/available-lands?land_type=unregistered')
+                .then(response => {
+                    console.log('API Response Status:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('API Data:', data);
+                    console.log('Number of listings:', data.listings ? data.listings.length : 0);
+                    
+                    if (data.listings && data.listings.length > 0) {
+                        document.getElementById('result').innerHTML = 
+                            '<h2 style="color: green;">✅ API WORKS!</h2>' +
+                            '<p>Found ' + data.listings.length + ' listings</p>' +
+                            '<pre>' + JSON.stringify(data.listings[0], null, 2) + '</pre>';
+                    } else {
+                        document.getElementById('result').innerHTML = 
+                            '<h2 style="color: orange;">⚠️ API Returns Empty</h2>' +
+                            '<p>API works but returned no listings</p>' +
+                            '<p>Check database: listings must be both active AND approved</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('API Error:', error);
+                    document.getElementById('result').innerHTML = 
+                        '<h2 style="color: red;">❌ API FAILED</h2>' +
+                        '<p>Error: ' + error.message + '</p>';
+                });
+        });
+    </script>
+</head>
+<body style="font-family: Arial; padding: 20px;">
+    <h1>Available Lands API Debug Test</h1>
+    <p>This page tests if the API endpoint works...</p>
+    
+    <div id="result">
+        <p>Loading... Check browser console (F12)</p>
+    </div>
+    
+    <hr>
+    
+    <h3>Manual Tests:</h3>
+    <ul>
+        <li><a href="/api/available-lands?land_type=unregistered" target="_blank">Test API: Unregistered Lands</a></li>
+        <li><a href="/api/available-lands?land_type=registered" target="_blank">Test API: Registered Lands</a></li>
+        <li><a href="/api/available-lands-geojson?land_type=unregistered" target="_blank">Test API: GeoJSON</a></li>
+    </ul>
+    
+    <h3>Instructions:</h3>
+    <ol>
+        <li>Open browser console (Press F12)</li>
+        <li>Look for console logs showing API response</li>
+        <li>Click the links above to test API directly</li>
+        <li>If API returns empty array, run SQL: <code>UPDATE available_lands SET status='active', admin_approval_status='approved';</code></li>
+    </ol>
+</body>
+</html>
